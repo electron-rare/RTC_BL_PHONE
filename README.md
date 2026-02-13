@@ -19,3 +19,13 @@ Voir `docs/plan_chef_projet_esp32s3_ag1171s.md` pour le planning en phases, les 
 - `src/main.cpp`: squelette firmware machine d'états pour intégration AG1171S.
 - `docs/solutions_rtc_phone_esp32.md`: comparaison des architectures et recommandations.
 - `docs/plan_chef_projet_esp32s3_ag1171s.md`: plan d'exécution projet version V0.1.
+2. Compiler et flasher l'environnement `esp32dev`.
+3. Ouvrir le moniteur série à 115200 bauds.
+
+## Choix de cartes ESP32
+Voir `docs/solutions_rtc_phone_esp32.md` pour la shortlist des DevKit utilisables (ESP32-DevKitC, ESP32-S3-DevKitC-1, NodeMCU-32S, LOLIN32) et les liens de référence web.
+
+## Contenu
+- `platformio.ini`: configuration initiale du projet.
+- `src/main.cpp`: prototype minimal (détection décroché/raccroché).
+- `docs/solutions_rtc_phone_esp32.md`: comparaison des meilleures architectures + sélection de DevKit ESP32 recommandés.
