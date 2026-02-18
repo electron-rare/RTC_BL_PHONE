@@ -1,0 +1,13 @@
+{
+  "timestamp_utc": "2026-02-18T15:24:30.797045+00:00",
+  "overall_passed": false,
+  "results": [
+    {
+      "name": "runner",
+      "passed": false,
+      "details": {
+        "error": "[Errno 2] could not open port /dev/ttyUSB0: [Errno 2] No such file or directory: '/dev/ttyUSB0'"
+      }
+    }
+  ]
+}

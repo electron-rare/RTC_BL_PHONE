@@ -1,8 +1,188 @@
+from __future__ import annotations
+import glob
+
+# --- Détection automatique des ports série compatibles ---
+def detect_serial_ports():
+    patterns = [
+        '/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbserial*', '/dev/cu.SLAB_USBtoUART*', '/dev/cu.wchusbserial*', '/dev/cu.usbmodem*'
+    ]
+    ports = []
+    for pat in patterns:
+        ports.extend(glob.glob(pat))
+    return ports
+
+# --- Identification du chip sur chaque port ---
+def reset_to_bootloader(port):
+    """Tente de forcer le reset en mode bootloader via DTR/RTS (méthode Espressif)."""
+    try:
+        import serial
+        with serial.Serial(port, baudrate=115200) as ser:
+            # DTR = 0, RTS = 1 => EN=0, IO0=1 (reset)
+            ser.dtr = False
+            ser.rts = True
+            time.sleep(0.1)
+            # DTR = 1, RTS = 0 => EN=1, IO0=0 (bootloader)
+            ser.dtr = True
+            ser.rts = False
+            time.sleep(0.1)
+            # Relâche tout
+            ser.dtr = False
+            ser.rts = False
+            time.sleep(0.1)
+    except Exception:
+        pass
+
+def identify_chip_on_port(port, baud=115200, timeout=1.0):
+    # 1. Tente un reset auto en mode bootloader
+    reset_to_bootloader(port)
+
+    # 2. Détection hardware via esptool (API robuste)
+    try:
+        import esptool
+        # Version la plus stricte (port, serial_list, connect_attempts, initial_baud)
+        if hasattr(esptool, 'get_default_connected_device'):
+            dev = esptool.get_default_connected_device(
+                port=port, serial_list=[port], connect_attempts=1, initial_baud=baud
+            )
+            desc = dev.get_chip_description()
+            return desc
+        elif hasattr(esptool.ESPLoader, 'detect_chip'):
+            chip = esptool.ESPLoader.detect_chip(port=port, baud=baud)
+            return chip.get_chip_description()
+        else:
+            # Fallback très ancien esptool
+            return None
+    except Exception:
+        return None
+
+# --- Sélection automatique des ports pour A252 et S3 ---
+def auto_select_ports():
+    ports = detect_serial_ports()
+    found = {}
+    for port in ports:
+        chip = identify_chip_on_port(port)
+        if chip:
+            if 'S3' in chip or 'ESP32-S3' in chip:
+                found['s3'] = port
+            elif 'A252' in chip or 'ESP32' in chip:
+                found['a252'] = port
+    return found
+# --- Test de coupure/rétablissement WiFi ---
+def scenario_wifi_cut_restore(device: SerialEndpoint, ssid: str, password: str) -> ScenarioResult:
+    details = {}
+    try:
+        # 1. Coupure WiFi
+        device.command("WIFI DISCONNECT", expected_prefixes=["OK"], timeout_s=3)
+        time.sleep(2)
+        wifi_status_cut = device.command("WIFI STATUS", expect_json=True, timeout_s=3)
+        details["wifi_after_cut"] = wifi_status_cut
+        # 2. Rétablissement WiFi
+        resp = device.command(f"WIFI CONNECT {ssid} {password}", expect_json=True, timeout_s=8)
+        details["wifi_reconnect"] = resp
+        wifi_status_re = device.command("WIFI STATUS", expect_json=True, timeout_s=3)
+        details["wifi_after_restore"] = wifi_status_re
+        passed = (wifi_status_cut.get("connected") is False) and (wifi_status_re.get("connected") is True)
+        return ScenarioResult(name=f"WiFi cut/restore {device.port}", passed=passed, details=details)
+    except Exception as exc:
+        return ScenarioResult(name=f"WiFi cut/restore {device.port}", passed=False, details={"error": str(exc)})
+# --- Test de connexion WiFi ---
+def scenario_wifi_connect(device: SerialEndpoint, ssid: str, password: str) -> ScenarioResult:
+    try:
+        resp = device.command(f"WIFI CONNECT {ssid} {password}", expect_json=True, timeout_s=8)
+        passed = resp.get("connected") is True
+        return ScenarioResult(name=f"WiFi connect {device.port}", passed=passed, details=resp)
+    except Exception as exc:
+        return ScenarioResult(name=f"WiFi connect {device.port}", passed=False, details={"error": str(exc)})
+
+# --- Test de connexion BLE ---
+def scenario_ble_connect(device: SerialEndpoint, device_name: str) -> ScenarioResult:
+    try:
+        resp = device.command(f"BT CONNECT {device_name}", expect_json=True, timeout_s=8)
+        passed = resp.get("connected") is True
+        return ScenarioResult(name=f"BLE connect {device.port}", passed=passed, details=resp)
+    except Exception as exc:
+        return ScenarioResult(name=f"BLE connect {device.port}", passed=False, details={"error": str(exc)})
+# --- Test de coupure/rétablissement WiFi et fallback BLE ---
+def scenario_wifi_cut_fallback_ble(device: SerialEndpoint) -> ScenarioResult:
+    details = {}
+    try:
+        # 1. Forcer la coupure WiFi
+        device.command("WIFI DISCONNECT", expected_prefixes=["OK"], timeout_s=3)
+        time.sleep(2)
+        wifi_status = device.command("WIFI STATUS", expect_json=True, timeout_s=3)
+        details["wifi_after_cut"] = wifi_status
+        # 2. Tenter fallback BLE
+        ble_resp = device.command("BT ENABLE", expect_json=True, timeout_s=4)
+        details["ble_enable"] = ble_resp
+        ble_status = device.command("BT STATUS", expect_json=True, timeout_s=3)
+        details["ble_status"] = ble_status
+        passed = (wifi_status.get("connected") is False) and ble_status.get("enabled") is True
+        return ScenarioResult(name=f"WiFi cut + fallback BLE {device.port}", passed=passed, details=details)
+    except Exception as exc:
+        return ScenarioResult(name=f"WiFi cut + fallback BLE {device.port}", passed=False, details={"error": str(exc)})
+# --- Scénario de scan WiFi ---
+def scenario_wifi_scan(device: SerialEndpoint, ssid_expected: Optional[str] = None) -> ScenarioResult:
+    try:
+        resp = device.command("WIFI SCAN", expect_json=True, timeout_s=8)
+        found = False
+        if isinstance(resp, dict) and "scan" in resp:
+            found = any((ssid_expected is None or ap.get("ssid") == ssid_expected) for ap in resp["scan"])
+        passed = found if ssid_expected else bool(resp.get("scan"))
+        details = {"found": found, "scan": resp.get("scan", [])}
+        return ScenarioResult(name=f"WiFi scan {device.port}", passed=passed, details=details)
+    except Exception as exc:
+        return ScenarioResult(name=f"WiFi scan {device.port}", passed=False, details={"error": str(exc)})
+
+# --- Scénario de scan BLE ---
+def scenario_ble_scan(device: SerialEndpoint, device_expected: Optional[str] = None) -> ScenarioResult:
+    try:
+        resp = device.command("BT SCAN", expect_json=True, timeout_s=8)
+        found = False
+        if isinstance(resp, dict) and "scan" in resp:
+            found = any((device_expected is None or d.get("name") == device_expected) for d in resp["scan"])
+        passed = found if device_expected else bool(resp.get("scan"))
+        details = {"found": found, "scan": resp.get("scan", [])}
+        return ScenarioResult(name=f"BLE scan {device.port}", passed=passed, details=details)
+    except Exception as exc:
+        return ScenarioResult(name=f"BLE scan {device.port}", passed=False, details={"error": str(exc)})
+
+# --- Test de reconnexion WiFi ---
+def scenario_wifi_reconnect(device: SerialEndpoint) -> ScenarioResult:
+    try:
+        device.command("WIFI DISCONNECT", expected_prefixes=["OK"], timeout_s=3)
+        time.sleep(2)
+        resp = device.command("WIFI RECONNECT", expect_json=True, timeout_s=6)
+        passed = resp.get("connected") is True
+        return ScenarioResult(name=f"WiFi reconnect {device.port}", passed=passed, details=resp)
+    except Exception as exc:
+        return ScenarioResult(name=f"WiFi reconnect {device.port}", passed=False, details={"error": str(exc)})
+
+# --- Vérification sécurisation API ---
+def scenario_api_security(base_url: str) -> ScenarioResult:
+    details = {}
+    try:
+        # Test accès sans authentification (doit échouer si auth requise)
+        req = request.Request(base_url.rstrip("/") + "/api/config", method="POST")
+        try:
+            with request.urlopen(req, timeout=3) as response:
+                details["unauth_status"] = response.status
+        except error.HTTPError as exc:
+            details["unauth_status"] = exc.code
+        # Test CORS (optionnel, dépend du serveur)
+        req = request.Request(base_url.rstrip("/") + "/api/config", method="OPTIONS")
+        try:
+            with request.urlopen(req, timeout=3) as response:
+                details["cors_status"] = response.status
+        except error.HTTPError as exc:
+            details["cors_status"] = exc.code
+        # Critère : accès POST non autorisé sans auth (401/403 attendu)
+        passed = details["unauth_status"] in (401, 403)
+        return ScenarioResult(name=f"API security {base_url}", passed=passed, details=details)
+    except Exception as exc:
+        return ScenarioResult(name=f"API security {base_url}", passed=False, details={"error": str(exc)})
+
 #!/usr/bin/env python3
 """Local hardware validation runner for A252 + ESP32-S3."""
-
-from __future__ import annotations
-
 import argparse
 import json
 import re
@@ -63,17 +243,17 @@ class SerialEndpoint:
         *,
         timeout_s: float = 5.0,
         expect_json: bool = False,
-        expected_prefixes: Optional[List[str]] = None,
-    ) -> Any:
-        if self._ser is None:
-            raise RuntimeError("serial endpoint is not open")
-
-        self._ser.write((cmd + "\n").encode("utf-8"))
+        expected_prefixes: Optional[list] = None,
+    ):
+        """Envoie une commande sur le port série et attend une réponse."""
+        if not self._ser or not self._ser.is_open:
+            raise RuntimeError("Serial port not open")
+        self._ser.write((cmd + "\r\n").encode())
         self._ser.flush()
-
-        deadline = time.monotonic() + timeout_s
+        import time, json
         last_line = ""
-        while time.monotonic() < deadline:
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
             raw = self._ser.readline()
             if not raw:
                 continue
@@ -82,18 +262,15 @@ class SerialEndpoint:
                 continue
             last_line = line
             print(f"[{self.port}] {line}")
-
             if expect_json:
                 try:
                     return json.loads(line)
                 except json.JSONDecodeError:
                     continue
-
             if expected_prefixes is None:
                 return line
             if any(line.startswith(prefix) for prefix in expected_prefixes):
                 return line
-
         raise RuntimeError(f"Timeout waiting response to '{cmd}' on {self.port}; last='{last_line}'")
 
 
@@ -268,6 +445,23 @@ def scenario_web_access(base_url: Optional[str], label: str) -> ScenarioResult:
         details["error"] = str(exc)
         return ScenarioResult(name=f"{label} web endpoints", passed=False, details=details)
 
+# --- Ajout des scénarios WiFi et Bluetooth ---
+def scenario_wifi_status(device: SerialEndpoint) -> ScenarioResult:
+    try:
+        resp = device.command("WIFI STATUS", expect_json=True, timeout_s=3)
+        passed = resp.get("connected") is True
+        return ScenarioResult(name=f"WiFi status {device.port}", passed=passed, details=resp)
+    except Exception as exc:
+        return ScenarioResult(name=f"WiFi status {device.port}", passed=False, details={"error": str(exc)})
+
+def scenario_bt_status(device: SerialEndpoint) -> ScenarioResult:
+    try:
+        resp = device.command("BT STATUS", expect_json=True, timeout_s=3)
+        passed = resp.get("enabled") is True
+        return ScenarioResult(name=f"Bluetooth status {device.port}", passed=passed, details=resp)
+    except Exception as exc:
+        return ScenarioResult(name=f"Bluetooth status {device.port}", passed=False, details={"error": str(exc)})
+
 
 def write_reports(results: List[ScenarioResult], report_json: Path, report_md: Path) -> None:
     overall_passed = all(item.passed for item in results)
@@ -306,8 +500,8 @@ def write_reports(results: List[ScenarioResult], report_json: Path, report_md: P
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="RTC_BL_PHONE hardware validation")
-    parser.add_argument("--port-a252", required=True, help="Serial port for A252 target")
-    parser.add_argument("--port-s3", required=True, help="Serial port for ESP32-S3 target")
+    parser.add_argument("--port-a252", required=False, help="Serial port for A252 target (auto si absent)")
+    parser.add_argument("--port-s3", required=False, help="Serial port for ESP32-S3 target (auto si absent)")
     parser.add_argument("--bench-port", required=True, help="Serial port for bench controller")
     parser.add_argument("--baud", type=int, default=115200, help="UART baudrate")
     parser.add_argument("--flash", action="store_true", help="Build and flash both targets before tests")
@@ -328,9 +522,51 @@ def maybe_flash(args: argparse.Namespace) -> None:
     run_cmd(["pio", "run", "-e", "esp32-s3-devkitc-1", "-t", "upload", "--upload-port", args.port_s3])
 
 
-def main() -> int:
+
+def reset_serial_port(port):
+    try:
+        import serial
+        with serial.Serial(port, baudrate=115200, timeout=0.2) as ser:
+            ser.dtr = False
+            ser.rts = False
+            ser.reset_input_buffer()
+            ser.reset_output_buffer()
+        print(f"[INFO] Reset logiciel du port {port} OK.")
+    except Exception as e:
+        print(f"[WARN] Reset logiciel du port {port} échoué: {e}")
+
     args = parse_args()
-    maybe_flash(args)
+    # Détection automatique des ports si non fournis
+
+    import time
+    if not args.port_a252 or not args.port_s3:
+        ports = auto_select_ports()
+        if not args.port_a252 and 'a252' in ports:
+            args.port_a252 = ports['a252']
+            print(f"[AUTO] Port A252 détecté : {args.port_a252}")
+        if not args.port_s3 and 's3' in ports:
+            args.port_s3 = ports['s3']
+            print(f"[AUTO] Port S3 détecté : {args.port_s3}")
+        if not args.port_a252 or not args.port_s3:
+            raise RuntimeError("Impossible de détecter automatiquement les ports série pour A252 et S3.")
+
+    # Pause pour s'assurer que les ports sont bien libérés
+    print("[INFO] Pause pour libérer les ports série...")
+    time.sleep(2)
+
+    # Build et upload systématique avant validation (robuste)
+    print("[BUILD] Compilation des firmwares A252 et S3...")
+    run_cmd(["pio", "run", "-e", "esp32dev", "-e", "esp32-s3-devkitc-1"])
+    print(f"[RESET] Logiciel du port {args.port_a252} avant upload...")
+    reset_serial_port(args.port_a252)
+    time.sleep(1)
+    print(f"[UPLOAD] Flash A252 sur {args.port_a252} ...")
+    run_cmd(["pio", "run", "-e", "esp32dev", "-t", "upload", "--upload-port", args.port_a252])
+    print(f"[RESET] Logiciel du port {args.port_s3} avant upload...")
+    reset_serial_port(args.port_s3)
+    time.sleep(1)
+    print(f"[UPLOAD] Flash S3 sur {args.port_s3} ...")
+    run_cmd(["pio", "run", "-e", "esp32-s3-devkitc-1", "-t", "upload", "--upload-port", args.port_s3])
 
     results: List[ScenarioResult] = []
     try:
@@ -342,12 +578,46 @@ def main() -> int:
             bench.command("PING", timeout_s=3)
             bench.command("RESET", timeout_s=3)
 
+
+            # --- Tests WiFi/BLE avancés ---
+            results.append(scenario_wifi_status(dev_a252))
+            results.append(scenario_wifi_scan(dev_a252))
+            # Test explicite de connexion WiFi (SSID/PASS à adapter)
+            results.append(scenario_wifi_connect(dev_a252, "TestSSID", "TestPASS"))
+            results.append(scenario_wifi_reconnect(dev_a252))
+            # Test coupure/rétablissement WiFi
+            results.append(scenario_wifi_cut_restore(dev_a252, "TestSSID", "TestPASS"))
+            results.append(scenario_bt_status(dev_a252))
+            results.append(scenario_ble_scan(dev_a252))
+            # Test explicite de connexion BLE (nom à adapter)
+            results.append(scenario_ble_connect(dev_a252, "TestBLEDevice"))
+
+            # Test de coupure WiFi + fallback BLE
+            results.append(scenario_wifi_cut_fallback_ble(dev_a252))
+
+            results.append(scenario_wifi_status(dev_s3))
+            results.append(scenario_wifi_scan(dev_s3))
+            results.append(scenario_wifi_connect(dev_s3, "TestSSID", "TestPASS"))
+            results.append(scenario_wifi_reconnect(dev_s3))
+            results.append(scenario_wifi_cut_restore(dev_s3, "TestSSID", "TestPASS"))
+            results.append(scenario_bt_status(dev_s3))
+            results.append(scenario_ble_scan(dev_s3))
+            results.append(scenario_ble_connect(dev_s3, "TestBLEDevice"))
+
+            results.append(scenario_wifi_cut_fallback_ble(dev_s3))
+
             results.append(scenario_slic_transition("SLIC transition A252", dev_a252, bench, "A252"))
             results.append(scenario_slic_transition("SLIC transition S3", dev_s3, bench, "S3"))
             results.append(scenario_a252_full_duplex(dev_a252, bench))
             results.append(scenario_s3_local(dev_s3, bench))
             results.append(scenario_web_access(args.a252_base_url or None, "A252"))
             results.append(scenario_web_access(args.s3_base_url or None, "S3"))
+
+            # --- Sécurisation API ---
+            if args.a252_base_url:
+                results.append(scenario_api_security(args.a252_base_url))
+            if args.s3_base_url:
+                results.append(scenario_api_security(args.s3_base_url))
     except Exception as exc:
         results.append(
             ScenarioResult(
