@@ -1,0 +1,20 @@
+---
+name: Pull Request
+about: Proposer une modification
+labels: [pull request]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: Décrivez la modification proposée.
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests
+      placeholder: Résumez les tests effectués.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      placeholder: Précisez l’impact sur le projet.

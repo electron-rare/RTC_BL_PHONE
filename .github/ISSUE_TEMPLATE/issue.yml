@@ -1,0 +1,28 @@
+---
+name: Issue
+about: Signaler un bug ou demander une fonctionnalité
+labels: [issue]
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - Bug
+        - Feature
+        - Documentation
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: Décrivez le problème ou la demande.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      placeholder: Étapes pour reproduire le bug.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      placeholder: Ajoutez les logs ou messages d’erreur.

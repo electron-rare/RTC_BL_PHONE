@@ -1,3 +1,229 @@
+
+## Exemple de pinout ESP32-DevKitC (WROOM-32) + SLIC K50835F + PCM5102
+
+| Fonction           | ESP32 Pin | Direction | Remarque                |
+|--------------------|-----------|-----------|-------------------------|
+| hookSense          | GPIO27    | IN        | Crochet (INPUT_PULLUP)  |
+| ringCmd            | GPIO26    | OUT       | Commande sonnerie       |
+| lineEnable         | GPIO25    | OUT       | Activation ligne        |
+| led                | GPIO2     | OUT       | Debug LED               |
+| I2S BCK (PCM5102)  | GPIO14    | OUT       | I2S0_BCK_OUT            |
+| I2S WS  (PCM5102)  | GPIO15    | OUT       | I2S0_WS_OUT             |
+| I2S DIN (PCM5102)  | GPIO22    | OUT       | I2S0_DO_OUT             |
+| Audio IN (ADC)     | GPIO36    | IN        | ADC1_CH0 (VP), micro    |
+
+- **Aucun conflit de pin détecté** avec cette configuration sur ESP32-DevKitC.
+- Les pins I2S sont standards et compatibles PCM5102.
+- GPIO36 (ADC1_CH0) est idéal pour l’entrée audio analogique (micro).
+- GPIO25/26/27/2 sont libres et utilisés pour la logique RTC.
+
+
+### Exemple d'initialisation I2S pour ESP32 Audio Kit V2.2 A252 (codec ES8388)
+
+```cpp
+#include <driver/i2s.h>
+
+// Configuration I2S pour ES8388 (sortie casque/HP, entrée micro)
+const i2s_config_t i2s_config = {
+   .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX),
+   .sample_rate = 16000, // 8k, 16k, 32k, 44.1k, 48k selon besoin
+   .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+   .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+   .communication_format = I2S_COMM_FORMAT_I2S_MSB,
+   .intr_alloc_flags = 0,
+   .dma_buf_count = 8,
+   .dma_buf_len = 64,
+   .use_apll = false,
+   .tx_desc_auto_clear = true,
+   .fixed_mclk = 0
+};
+
+const i2s_pin_config_t pin_config = {
+   .bck_io_num = 27,   // I2S BCK
+   .ws_io_num = 25,    // I2S WS
+   .data_out_num = 26, // I2S DIN (vers ES8388)
+   .data_in_num = 35   // I2S DOUT (depuis ES8388)
+};
+
+void setup() {
+   // ... autres inits ...
+   i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+   i2s_set_pin(I2S_NUM_0, &pin_config);
+   // Initialisation du codec ES8388 via I2C (voir librairie es8388 ou esp-adf)
+}
+```
+
+> Pour la gestion complète du codec ES8388 (volume, routing, etc.), utiliser une librairie dédiée comme [ESP-ADF](https://github.com/espressif/esp-adf) ou une librairie Arduino ES8388. L’I2S seul ne suffit pas à configurer le codec : il faut aussi l’initialiser via I2C.
+
+**À ajuster selon ton routage réel et la disponibilité des broches sur ta carte.**
+
+## Exemple de pinout ESP32 Audio Kit V2.2 A252 + SLIC K50835F
+
+> **Remarque :** L'ESP32 Audio Kit V2.2 A252 intègre déjà un codec audio I2S ES8388 (entrée/sortie analogique, ampli casque, micro, etc.). Il n'est donc **pas nécessaire d'ajouter un PCM5102**. Utilise directement les entrées/sorties audio du kit !
+
+| Fonction           | ESP32 Audio Kit V2.2 Pin | Direction | Remarque                                 |
+|--------------------|--------------------------|-----------|-------------------------------------------|
+| hookSense          | GPIO36 (ADC1_CH0)        | IN        | Crochet (INPUT_PULLUP)                    |
+| ringCmd            | GPIO21                   | OUT       | Commande sonnerie (GPIO dispo)            |
+| lineEnable         | GPIO19                   | OUT       | Activation ligne (GPIO dispo)             |
+| led                | GPIO22                   | OUT       | Debug LED (ou autre GPIO libre)           |
+| I2S BCK            | GPIO27                   | OUT       | I2S0_BCK_OUT (vers ES8388, casque, HP)    |
+| I2S WS             | GPIO25                   | OUT       | I2S0_WS_OUT (vers ES8388)                 |
+| I2S DIN            | GPIO26                   | OUT       | I2S0_DO_OUT (vers ES8388)                 |
+| I2S DOUT           | GPIO35                   | IN        | I2S0_DI_IN (entrée micro ES8388)          |
+| Audio IN (ADC)     | GPIO34 (ADC1_CH6)        | IN        | Entrée micro (ADC, jack IN, optionnelle)  |
+
+- **Aucun conflit de pin détecté** avec cette configuration sur ESP32 Audio Kit V2.2 A252.
+- Les pins I2S sont câblés d'origine vers le codec ES8388 (sortie casque, HP, entrée micro, etc.).
+- GPIO34/36 sont disponibles pour entrées analogiques (micro, hook, etc.).
+- GPIO21/19/22 sont libres sur la carte pour la logique RTC.
+
+**À ajuster selon ton routage réel et la disponibilité des broches sur ta carte.**
+## Options de câblage audio ESP32 <-> SLIC K50835F
+
+### 1. Sortie audio numérique (I2S) via PCM5102
+
+```
+   +---------+      I2S      +----------+    Analog    +--------------+
+   |  ESP32  |-------------->| PCM5102  |------------->| SLIC K50835F |
+   +---------+               +----------+              +--------------+
+         |                        |                          |
+   (I2S_OUT: BCK, WS, DIN)   (L/R OUT)                (AUDIO IN)
+```
+
+### 2. Entrée micro analogique sur ADC ESP32
+
+```
+   +--------------+    Analog    +---------+
+   | SLIC K50835F |------------>|  ESP32  |
+   +--------------+             +---------+
+        (AUDIO OUT)         (ADC: ex. GPIO34)
+```
+
+### 3. Option : sortie audio sur DAC interne ESP32
+
+```
+   +---------+    Analog    +--------------+
+   |  ESP32  |------------>| SLIC K50835F |
+   +---------+             +--------------+
+   (DAC: ex. GPIO25/26)    (AUDIO IN)
+```
+
+**Remarques :**
+## Structure logicielle minimale (exemple C++/Arduino)
+
+```cpp
+// Déclaration d'une classe simple pour piloter le SLIC K50835F
+class SlicK50835F {
+public:
+   void begin();
+   void setLineEnabled(bool enabled);
+   void setRing(bool enabled);
+   bool isHookOff() const;
+   bool isLineFault() const;
+   // ... autres méthodes selon besoins
+};
+
+// Exemple d’utilisation dans setup/loop
+SlicK50835F slic;
+
+void setup() {
+   slic.begin();
+   slic.setLineEnabled(true);
+}
+
+void loop() {
+   if (slic.isHookOff()) {
+      // Gérer appel en cours
+   }
+   if (slic.isLineFault()) {
+      // Sécurité : couper la ligne, alerter
+   }
+}
+```
+
+**À compléter avec :**
+## Points d’attention hardware et sécurité (SLIC K50835F)
+
+- **Alimentation** :
+   - Utiliser une alimentation stable et filtrée (5V ou 3.3V selon module).
+   - Séparer les masses analogique et numérique si possible.
+- **Protection ligne** :
+   - Ajouter des diodes de protection ESD sur TIP/RING.
+   - Prévoir fusible ou résistance de limitation sur l’alimentation de boucle.
+- **Découplage** :
+   - Condensateurs de découplage proches des broches d’alim du SLIC.
+- **Isolation** :
+   - Ne jamais connecter à une ligne téléphonique publique sans homologation.
+   - Prévoir isolation galvanique si risque de contact avec le réseau public.
+- **Routage PCB** :
+   - Tracer les lignes audio loin des signaux numériques rapides.
+   - Minimiser la longueur des pistes audio et de puissance.
+- **Test et validation** :
+   - Vérifier l’absence de surchauffe du SLIC et des composants associés.
+   - Mesurer les niveaux audio et la tension de boucle avant branchement du téléphone.
+- **Sécurité utilisateur** :
+   - Boîtier fermé, pas d’accès direct aux parties sous tension.
+   - Etiquetage clair si prototype.
+## Schéma de connexion typique ESP32 <-> SLIC K50835F
+
+```
+   +-------------------+         +---------------------+
+   |      ESP32        |         |   SLIC K50835F      |
+   |                   |         |                     |
+   |  GPIO4  <-------- |---HOOK--| > Hook sense        |
+   |  GPIO5  --------> |---RING--| < Ring control      |
+   |  GPIO6  --------> |---LINE--| < Line enable       |
+   |  GPIO48 --------> |---LED---| (debug, optionnel)  |
+   |                   |         |                     |
+   |  I2S_OUT ------+  |         |  +-- AUDIO_IN        |
+   |                |--|---------|--|                  |
+   |  I2S_IN  <----+   |         |  +-- AUDIO_OUT       |
+   +-------------------+         +---------------------+
+```
+
+**Explications :**
+- Les signaux HOOK, RING, LINE sont à adapter selon le schéma d’application du SLIC K50835F (niveau logique, polarité, etc.).
+- L’audio analogique transite via un codec I2S (ex : PCM5102, ES8388) entre l’ESP32 et le SLIC K50835F.
+- Prévoir adaptation d’impédance et filtrage sur les lignes audio.
+- Les broches sont données à titre d’exemple, à ajuster selon le routage réel.
+
+**À compléter avec :**
+- Alimentation dédiée 5V/3.3V pour le SLIC K50835F.
+- Protections ESD/surtension sur les lignes TIP/RING.
+- Masse analogique séparée si possible.
+## Fonctionnalités principales à développer autour du SLIC K50835F
+
+1. **Gestion du décroché/raccroché (hook sense)**
+   - Lecture de l’état du combiné via GPIO (décroché/raccroché).
+   - Déclenchement d’événements firmware (prise d’appel, fin d’appel).
+
+2. **Commande de la sonnerie**
+   - Activation/désactivation de la sonnerie via GPIO ou commande dédiée.
+   - Scénarios d’appel entrant simulé.
+
+3. **Activation/désactivation de la ligne**
+   - Contrôle de l’alimentation de boucle (line enable) pour simuler la présence d’une ligne RTC.
+
+4. **Gestion des états de ligne**
+   - Détection d’erreurs (line fault, surintensité, etc.)
+   - Monitoring de l’état ligne pour sécurité et diagnostic.
+
+5. **Interface audio**
+   - Routage de l’audio analogique entre ESP32 (I2S/codec) et SLIC K50835F.
+   - Adaptation d’impédance, filtrage, gestion du gain.
+
+6. **Numérotation et détection DTMF/impulsions**
+   - Lecture du clavier (matrice ou impulsions) pour composer un numéro.
+   - Décodage DTMF matériel ou logiciel si besoin.
+
+7. **Journalisation et diagnostic**
+   - Log des événements (décroché, appel, erreurs ligne, etc.)
+   - Statistiques d’utilisation, export série ou stockage local.
+
+8. **Sécurité et protection**
+   - Gestion des protections électriques (surintensité, surtension, isolation).
+   - Détection et gestion des conditions anormales.
 # Solutions recommandées: ESP32 + téléphone RTC ancien
 
 ## Objectif
@@ -41,31 +267,35 @@ Créer un projet PlatformIO sur ESP32 pour réutiliser un ancien téléphone ana
 - Design analogique + sécurité plus exigeants.
 - Debug plus long.
 
-### Variante concrète: module **Silvertel AG1171S**
-Si tu veux garder un ancien téléphone tel quel (2 fils TIP/RING) avec une carte ESP32, l'AG1171S est une piste concrète côté **FXS/SLIC**.
+
+
+### Variante concrète : module **SLIC K50835F**
+Si tu veux garder un ancien téléphone tel quel (2 fils TIP/RING) avec une carte ESP32, le SLIC K50835F est une solution moderne côté **FXS/SLIC**.
 
 #### Ce que ça apporte
-- Génération de la boucle analogique pour alimenter un poste RTC ancien.
-- Interface pensée pour créer une "ligne privée" locale (pas une connexion directe PSTN brute).
+- Génération de la boucle analogique pour alimenter un poste RTC ancien (fonction FXS complète).
+- Gestion de la sonnerie, de la détection de décroché/raccroché, et de la signalisation ligne.
+- Intégration facilitée pour créer une "ligne privée" locale (pas de connexion directe PSTN).
 - Réduction de la complexité analogique par rapport à un design SLIC discret from-scratch.
 
 #### Comment l'intégrer proprement avec ESP32
-1. **AG1171S = étage ligne analogique** (alimentation de boucle, interface 2 fils).
-2. **ESP32 = logique et signalisation** (états off-hook/on-hook, numérotation, scénarios).
-3. **Chemin audio**:
-   - soit via codec audio externe (I2S) + adaptation vers l'étage ligne,
-   - soit via une architecture où l'audio analogique reste majoritairement côté téléphonie, et l'ESP32 pilote surtout la logique.
-4. **Détection d'événements**: exposer vers GPIO les états utiles (hook, ring detect selon schéma d'application).
+1. **SLIC K50835F = étage ligne analogique** (alimentation de boucle, interface 2 fils, gestion ring/hook).
+2. **ESP32 = logique et signalisation** (états off-hook/on-hook, numérotation, scénarios, gestion d'appel).
+3. **Chemin audio** :
+   - via codec audio externe (I2S) connecté entre l'ESP32 et le SLIC K50835F (entrée/sortie audio analogique).
+   - prévoir adaptation d'impédance et filtrage si besoin.
+4. **Détection d'événements** :
+   - Exposer vers GPIO les états utiles (hook, ring detect, line fault, etc.) selon le schéma d'application SLIC K50835F.
 
 #### Points d'attention (importants)
-- Respecter strictement les notes d'application Silvertel (DC feed, protection, découplage, routage).
-- Ne pas connecter à une ligne publique sans conformité réglementaire et schéma adapté.
+- Respecter strictement les notes d'application du SLIC K50835F (alimentation, découplage, protection, routage PCB).
+- Ne jamais connecter à une ligne publique sans conformité réglementaire et schéma adapté.
 - Prévoir protections (surintensité/surtension) et isolation selon l'usage final.
 - Valider impédance et niveau audio pour éviter faible volume, saturation, écho/larsen.
 
 #### Recommandation projet
-- **MVP rapide**: continuer Option A (combiné + clavier en hard) pour avancer sur firmware.
-- **Version "vraie ligne 2 fils"**: passer en Option B avec AG1171S quand la logique applicative est stable.
+- **MVP rapide** : continuer Option A (combiné + clavier en hard) pour avancer sur firmware.
+- **Version "vraie ligne 2 fils"** : passer en Option B avec SLICK50835F quand la logique applicative est stable.
 
 
 ### Proposition de mapping initial (ESP32-S3-DevKitC-1)

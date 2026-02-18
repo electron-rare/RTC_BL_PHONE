@@ -1,0 +1,109 @@
+:root {
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --text: #1f2933;
+  --accent: #0f6ab6;
+  --accent-strong: #084a81;
+  --ok: #19753d;
+  --border: #d8dee4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 24px;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  background: linear-gradient(135deg, #edf4fa, #f8f9fb);
+  color: var(--text);
+}
+
+header {
+  margin-bottom: 16px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  color: var(--accent);
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent-strong);
+}
+
+section {
+  display: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+section.active {
+  display: block;
+}
+
+#contactsList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.contact-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fcfdff;
+}
+
+.contact-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+input,
+select {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+pre {
+  background: #1f2933;
+  color: #e8eef4;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+#contactFeedback {
+  margin-top: 8px;
+  color: var(--ok);
+}
