@@ -169,6 +169,20 @@ function bindEvents() {
     }
   });
 
+  document.getElementById("wifiReconnectBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/network/wifi/reconnect", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshStatus(), refreshNetwork()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
   document.getElementById("wifiScanBtn").addEventListener("click", async () => {
     try {
       const result = await requestJson("/api/network/wifi/scan", {
@@ -211,9 +225,32 @@ function bindEvents() {
     }
   });
 
+  document.getElementById("mqttPublishForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const topic = document.getElementById("mqttTopic").value.trim();
+    const payload = document.getElementById("mqttPayload").value;
+    try {
+      const result = await requestJson("/api/network/mqtt/publish", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ topic, payload }),
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshStatus(), refreshNetwork()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
   document.getElementById("espnowOnBtn").addEventListener("click", async () => {
     try {
-      await sendControl("ESPNOW_ON");
+      const result = await requestJson("/api/network/espnow/on", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshStatus(), refreshNetwork()]);
     } catch (error) {
       setJson("actionResult", { error: error.message });
     }
@@ -221,7 +258,13 @@ function bindEvents() {
 
   document.getElementById("espnowOffBtn").addEventListener("click", async () => {
     try {
-      await sendControl("ESPNOW_OFF");
+      const result = await requestJson("/api/network/espnow/off", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshStatus(), refreshNetwork()]);
     } catch (error) {
       setJson("actionResult", { error: error.message });
     }

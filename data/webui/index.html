@@ -46,6 +46,7 @@
           </form>
           <div class="inline-actions">
             <button id="wifiDisconnectBtn">Déconnecter WiFi</button>
+            <button id="wifiReconnectBtn">Reconnecter WiFi</button>
             <button id="wifiScanBtn">Scanner WiFi</button>
           </div>
           <pre id="wifiJson"></pre>
@@ -57,6 +58,11 @@
             <button id="mqttConnectBtn">Connecter MQTT</button>
             <button id="mqttDisconnectBtn">Déconnecter MQTT</button>
           </div>
+          <form id="mqttPublishForm">
+            <input type="text" id="mqttTopic" placeholder="Topic (ex: rtc_bl_phone/a252/test)" required>
+            <textarea id="mqttPayload" rows="3" placeholder='Payload JSON ou texte'>{"ping":true}</textarea>
+            <button type="submit">Publier MQTT</button>
+          </form>
           <pre id="mqttJson"></pre>
         </div>
 

@@ -148,6 +148,8 @@ void WebServerManager::registerRoutes() {
     });
     server_.on("/api/network/wifi/disconnect", HTTP_POST,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "WIFI_DISCONNECT"); });
+    server_.on("/api/network/wifi/reconnect", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "WIFI_RECONNECT"); });
     server_.on("/api/network/wifi/scan", HTTP_POST,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "WIFI_SCAN"); });
 
@@ -176,6 +178,10 @@ void WebServerManager::registerRoutes() {
     // ESP-NOW.
     server_.on("/api/network/espnow", HTTP_GET,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "ESPNOW_STATUS"); });
+    server_.on("/api/network/espnow/on", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "ESPNOW_ON"); });
+    server_.on("/api/network/espnow/off", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "ESPNOW_OFF"); });
     server_.on("/api/network/espnow/peer", HTTP_GET,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "ESPNOW_PEER_LIST"); });
     server_.on("/api/network/espnow/peer", HTTP_POST, [this](AsyncWebServerRequest* request) {
