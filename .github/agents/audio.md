@@ -17,6 +17,7 @@ Gestion de l’audio (I2S, ES8388, SLIC K50835F, ADC/DAC internes) pour le tél�
 
 ## Références
 - docs/solutions_rtc_phone_esp32.md
+- docs/fiche_agent_audio_tools.md
 - Schémas de câblage dans docs/
 - Exemples d’initialisation I2S dans le firmware (src/main.cpp)
 
@@ -49,4 +50,12 @@ Gestion de l’audio (I2S, ES8388, SLIC K50835F, ADC/DAC internes) pour le tél�
 ### Sécurité
 - Mapping pins selon ESP32/ESP32-S3.
 - Filtrage alimentation, protection ESD.
+
+### Limitations et recommandations
+- ES8388 : nécessite une initialisation I2C en plus d’I2S (utiliser une librairie dédiée, ex. ESP-ADF).
+- La gestion du volume/routage dépend du hardware (ES8388, PCM5102, GenericCodec).
+- Toujours tester le loopback audio sur chaque plateforme.
+- Vérifier la protection ESD et l’alimentation.
+- Documenter toute divergence hardware/firmware dans README et docs/solutions_rtc_phone_esp32.md.
+- Logs série obligatoires pour tout bug ou anomalie.
 

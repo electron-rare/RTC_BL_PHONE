@@ -6,14 +6,8 @@
 #include <ESPAsyncWebServer.h>
 
 #include <functional>
-#include <map>
-#include <vector>
 
-struct WebContact {
-    String nom;
-    String numero;
-    String type;
-};
+#include "core/CommandDispatcher.h"
 
 class WebServerManager {
 public:
@@ -26,8 +20,8 @@ public:
     bool isAuthEnabled() const;
     void setRateLimitMs(uint32_t rate_limit_ms);
 
-    void setControlCallback(std::function<bool(const String&, const JsonVariantConst&)> callback);
     void setStatusCallback(std::function<void(JsonObject)> callback);
+    void setCommandExecutor(std::function<DispatchResponse(const String&)> callback);
 
 private:
     AsyncWebServer server_;
@@ -35,21 +29,18 @@ private:
     bool auth_enabled_;
     String auth_user_;
     String auth_pass_;
-    String config_param1_;
-    String config_param2_;
-    std::vector<WebContact> contacts_;
-    std::map<String, uint32_t> last_request_ms_;
-    std::function<bool(const String&, const JsonVariantConst&)> control_callback_;
     std::function<void(JsonObject)> status_callback_;
+    std::function<DispatchResponse(const String&)> command_executor_;
 
     void registerRoutes();
-    bool isRateLimited(const String& ip);
-    bool authenticateRequest(AsyncWebServerRequest* request);
-    static bool extractJsonBody(AsyncWebServerRequest* request, DynamicJsonDocument& doc);
-    static bool isValidInput(const String& value, size_t max_len);
+    bool authenticateRequest(AsyncWebServerRequest* request) const;
+    static bool extractJsonBody(AsyncWebServerRequest* request, JsonDocument& doc);
     static String toJsonString(const JsonDocument& doc);
-    void loadAuthCredentials();
-    void persistAuthCredentials() const;
+    static bool isValidInput(const String& value, size_t max_len);
+    void handleDispatch(AsyncWebServerRequest* request,
+                        const String& command_line,
+                        uint16_t success_code = 200,
+                        uint16_t error_code = 400);
 };
 
 #endif  // WEB_WEB_SERVER_MANAGER_H

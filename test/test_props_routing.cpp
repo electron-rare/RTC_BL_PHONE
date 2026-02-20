@@ -11,13 +11,4 @@ bool fakeExecuteCommand(const String& cmd, const JsonVariantConst* payloadOpt) {
     return true;
 }
 
-void test_props_handle_ping() {
-    PropsBridge bridge;
-    DynamicJsonDocument doc(64);
-    doc["cmd"] = "PING";
-    bridge.handleCommand(doc.as<JsonVariantConst>());
-    // TODO: brancher executeCommand dans PropsBridge pour vrai test
-    TEST_ASSERT_TRUE(true); // Placeholder
-}
-
-// setup/loop désactivés pour éviter conflit
+// Tests déplacés dans test_main.cpp

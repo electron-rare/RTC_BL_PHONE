@@ -83,10 +83,30 @@ void BluetoothManager::logStatus() const {
                   peer_mac_.c_str());
 }
 
+void BluetoothManager::statusToJson(JsonObject obj) const {
+    obj["connected"] = connected_;
+    obj["hfp_active"] = hfp_active_;
+    obj["ble_active"] = ble_active_;
+    obj["security_enabled"] = security_enabled_;
+    obj["peer"] = peer_mac_;
+}
+
 void BluetoothManager::setSecurity(bool enabled) {
     security_enabled_ = enabled;
 }
 
 bool BluetoothManager::isSecurityEnabled() const {
     return security_enabled_;
+}
+
+bool BluetoothManager::isHfpActive() const {
+    return hfp_active_;
+}
+
+bool BluetoothManager::isBleActive() const {
+    return ble_active_;
+}
+
+String BluetoothManager::peerMac() const {
+    return peer_mac_;
 }

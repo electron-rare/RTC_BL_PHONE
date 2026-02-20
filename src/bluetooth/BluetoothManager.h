@@ -2,6 +2,7 @@
 #define BLUETOOTH_BLUETOOTH_MANAGER_H
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 #include "core/PlatformProfile.h"
 
@@ -17,8 +18,12 @@ public:
     bool startBLE();
     bool stopBLE();
     void logStatus() const;
+    void statusToJson(JsonObject obj) const;
     void setSecurity(bool enabled);
     bool isSecurityEnabled() const;
+    bool isHfpActive() const;
+    bool isBleActive() const;
+    String peerMac() const;
 
 private:
     FeatureMatrix features_;
