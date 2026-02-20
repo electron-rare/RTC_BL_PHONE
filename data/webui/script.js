@@ -228,8 +228,7 @@ function bindEvents() {
   document.getElementById("mqttPublishForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const topic = document.getElementById("mqttTopic").value.trim();
-    const payloadRaw = document.getElementById("mqttPayload").value;
-    const payload = parsePayloadValue(payloadRaw);
+    const payload = document.getElementById("mqttPayload").value;
     try {
       const result = await requestJson("/api/network/mqtt/publish", {
         method: "POST",
