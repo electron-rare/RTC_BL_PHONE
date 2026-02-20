@@ -12,6 +12,10 @@ EspNowBridge::EspNowBridge() {
 }
 
 bool EspNowBridge::begin(const EspNowPeerStore& initial_peers) {
+    if (ready_) {
+        return true;
+    }
+
     store_ = initial_peers;
 
     WiFi.mode(WIFI_STA);
@@ -31,6 +35,16 @@ bool EspNowBridge::begin(const EspNowPeerStore& initial_peers) {
         addPeerInternal(mac, false);
     }
     return true;
+}
+
+bool EspNowBridge::stop() {
+    if (!ready_) {
+        return true;
+    }
+
+    const esp_err_t err = esp_now_deinit();
+    ready_ = false;
+    return err == ESP_OK;
 }
 
 void EspNowBridge::tick() {
@@ -81,6 +95,7 @@ void EspNowBridge::statusToJson(JsonObject obj) const {
     obj["tx_fail"] = tx_fail_;
     obj["rx_count"] = rx_count_;
     obj["last_rx_mac"] = last_rx_mac_;
+    obj["last_rx_payload"] = last_rx_payload_;
 
     JsonArray peers = obj["peers"].to<JsonArray>();
     for (const String& peer : store_.peers) {
@@ -155,12 +170,11 @@ bool EspNowBridge::sendToMac(const uint8_t mac[6], const String& payload) {
     }
 
     const esp_err_t err = esp_now_send(mac, reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length());
-    if (err == ESP_OK) {
-        tx_ok_++;
-        return true;
+    if (err != ESP_OK) {
+        tx_fail_++;
+        return false;
     }
-    tx_fail_++;
-    return false;
+    return true;
 }
 
 void EspNowBridge::onDataRecv(const uint8_t* mac_addr, const uint8_t* data, int len) {

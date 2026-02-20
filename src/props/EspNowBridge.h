@@ -16,6 +16,7 @@ public:
     EspNowBridge();
 
     bool begin(const EspNowPeerStore& initial_peers);
+    bool stop();
     void tick();
 
     bool addPeer(const String& mac);

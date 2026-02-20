@@ -314,10 +314,14 @@ Le rapport HTML sera disponible dans `coverage/html`.
 Lancez les tests avec PlatformIO :
 
 ```bash
-pio test
+bash scripts/test_terminal.sh
 ```
 
-Puis générez le rapport de couverture.
+Ce script enchaîne:
+- Build des tests embarqués sans upload matériel.
+- Tests hôte DTMF (génération de tonalités synthétiques) en terminal.
+
+Puis, si besoin, générez le rapport de couverture.
 
 ### Objectif
 Ces ajouts permettent de valider la robustesse, la gestion mémoire, la sécurité multithread et les interactions entre modules, tout en mesurant la couverture des tests.
