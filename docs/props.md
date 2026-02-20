@@ -8,6 +8,12 @@
 ## ESP-NOW
 - Contrôle local sans broker, même schéma de payload JSON.
 - Les événements sont broadcastés à tous les pairs ESP-NOW.
+- Commandes série runtime disponibles : `ESPNOW_ON`, `ESPNOW_OFF`, `ESPNOW_STATUS`, `ESPNOW_PEER_ADD`, `ESPNOW_PEER_DEL`, `ESPNOW_PEER_LIST`, `ESPNOW_SEND`.
+- Pour la compatibilité inter-repos (`le-mystere-professeur-zacus`), la commande entrante peut être lue depuis :
+  - `cmd`, `raw`, `command`, `action`
+  - `event.<...>` (objet imbriqué)
+  - `message.<...>` (objet imbriqué)
+  - `payload.<...>` (objet ou texte)
 
 ## DTMF logiciel
 - Détection Goertzel sur frames audio, publication des chiffres détectés dans les événements MQTT/ESP-NOW.
