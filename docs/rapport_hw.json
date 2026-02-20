@@ -1,6 +1,6 @@
 {
-  "timestamp_utc": "2026-02-20T20:33:53.045753+00:00",
-  "overall_passed": false,
+  "timestamp_utc": "2026-02-20T20:49:57.303991+00:00",
+  "overall_passed": true,
   "results": [
     {
       "name": "serial_smoke",
@@ -34,7 +34,7 @@
             "has_credentials": true,
             "ssid": "Les cils",
             "ip": "192.168.0.103",
-            "rssi": -79,
+            "rssi": -71,
             "state": "connected",
             "ap_active": false,
             "ap_ssid": "",
@@ -59,11 +59,19 @@
             "peers": []
           },
           "bluetooth": {
+            "stack_ready": true,
             "connected": false,
             "hfp_active": false,
+            "hfp_requested": false,
             "ble_active": false,
+            "ble_client_connected": false,
             "security_enabled": false,
-            "peer": ""
+            "peer": "",
+            "last_hfp_event": "initialized",
+            "last_ble_event": "initialized",
+            "last_error": "",
+            "ble_last_command": "",
+            "ble_last_response": ""
           },
           "config": {
             "pins": {
@@ -131,7 +139,7 @@
           "has_credentials": true,
           "ssid": "Les cils",
           "ip": "192.168.0.103",
-          "rssi": -79,
+          "rssi": -72,
           "state": "connected",
           "ap_active": false,
           "ap_ssid": "",
@@ -143,37 +151,31 @@
           "networks": [
             {
               "ssid": "Les cils",
-              "rssi": -57,
+              "rssi": -52,
               "chan": 11,
               "enc": 4
             },
             {
-              "ssid": "CILS House",
-              "rssi": -69,
-              "chan": 9,
-              "enc": 7
-            },
-            {
               "ssid": "Les cils",
-              "rssi": -72,
+              "rssi": -71,
               "chan": 6,
               "enc": 3
             },
             {
               "ssid": "Les cils",
-              "rssi": -78,
+              "rssi": -71,
               "chan": 1,
               "enc": 4
             },
             {
               "ssid": "La-clic",
-              "rssi": -85,
+              "rssi": -90,
               "chan": 1,
               "enc": 3
             },
             {
               "ssid": "venus-HQ203587TYP-031",
-              "rssi": -87,
+              "rssi": -90,
               "chan": 1,
               "enc": 3
             }
@@ -188,7 +190,7 @@
           "has_credentials": true,
           "ssid": "Les cils",
           "ip": "192.168.0.103",
-          "rssi": -79,
+          "rssi": -72,
           "state": "connected",
           "ap_active": false,
           "ap_ssid": "",
@@ -220,11 +222,19 @@
           "peers": []
         },
         "bt_status": {
+          "stack_ready": true,
           "connected": false,
           "hfp_active": false,
+          "hfp_requested": false,
           "ble_active": false,
+          "ble_client_connected": false,
           "security_enabled": false,
-          "peer": ""
+          "peer": "",
+          "last_hfp_event": "initialized",
+          "last_ble_event": "initialized",
+          "last_error": "",
+          "ble_last_command": "",
+          "ble_last_response": ""
         }
       }
     },
@@ -257,7 +267,7 @@
             "has_credentials": true,
             "ssid": "Les cils",
             "ip": "192.168.0.103",
-            "rssi": -82,
+            "rssi": -77,
             "state": "connected",
             "ap_active": false,
             "ap_ssid": "",
@@ -282,11 +292,19 @@
             "peers": []
           },
           "bluetooth": {
+            "stack_ready": true,
             "connected": false,
             "hfp_active": false,
+            "hfp_requested": false,
             "ble_active": false,
+            "ble_client_connected": false,
             "security_enabled": false,
-            "peer": ""
+            "peer": "",
+            "last_hfp_event": "initialized",
+            "last_ble_event": "initialized",
+            "last_error": "",
+            "ble_last_command": "",
+            "ble_last_response": ""
           },
           "config": {
             "pins": {
@@ -332,7 +350,7 @@
           "has_credentials": true,
           "ssid": "Les cils",
           "ip": "192.168.0.103",
-          "rssi": -73,
+          "rssi": -70,
           "state": "connected",
           "ap_active": false,
           "ap_ssid": "",
@@ -364,11 +382,19 @@
           "peers": []
         },
         "bluetooth": {
+          "stack_ready": true,
           "connected": false,
           "hfp_active": false,
+          "hfp_requested": false,
           "ble_active": false,
+          "ble_client_connected": false,
           "security_enabled": false,
-          "peer": ""
+          "peer": "",
+          "last_hfp_event": "initialized",
+          "last_ble_event": "initialized",
+          "last_error": "",
+          "ble_last_command": "",
+          "ble_last_response": ""
         },
         "control_call": {
           "ok": true,
@@ -378,30 +404,30 @@
     },
     {
       "name": "manual_hook_transition",
-      "state": "MANUAL_FAIL",
+      "state": "MANUAL_SKIP",
       "details": {
-        "note": "manual terminal run: voir docs/rapport_manual_terminal_bt.json + .md"
+        "note": "BLE real + HFP stack real test reports: docs/rapport_ble_mac.json docs/rapport_hfp_mac.json"
       }
     },
     {
       "name": "manual_ring_behavior",
-      "state": "MANUAL_PASS",
+      "state": "MANUAL_SKIP",
       "details": {
-        "note": "manual terminal run: voir docs/rapport_manual_terminal_bt.json + .md"
+        "note": "BLE real + HFP stack real test reports: docs/rapport_ble_mac.json docs/rapport_hfp_mac.json"
       }
     },
     {
       "name": "manual_audio_path",
-      "state": "MANUAL_FAIL",
+      "state": "MANUAL_SKIP",
       "details": {
-        "note": "manual terminal run: voir docs/rapport_manual_terminal_bt.json + .md"
+        "note": "BLE real + HFP stack real test reports: docs/rapport_ble_mac.json docs/rapport_hfp_mac.json"
       }
     },
     {
       "name": "manual_hfp_pairing",
-      "state": "MANUAL_FAIL",
+      "state": "MANUAL_SKIP",
       "details": {
-        "note": "manual terminal run: voir docs/rapport_manual_terminal_bt.json + .md"
+        "note": "BLE real + HFP stack real test reports: docs/rapport_ble_mac.json docs/rapport_hfp_mac.json"
       }
     }
   ]

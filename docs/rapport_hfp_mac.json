@@ -1,0 +1,123 @@
+{
+  "timestamp_utc": "2026-02-20T20:48:25.147633+00:00",
+  "hfp_mac": "B4:1B:B0:84:73:06",
+  "steps": {
+    "ping": {
+      "result": "PONG",
+      "lines": [
+        "[AudioEngine] ready (full_duplex=true)",
+        "[RTC_BL_PHONE] HW init slic=ok codec=ok audio=ok",
+        "[WebServerManager] HTTP server started",
+        "[RTC_BL_PHONE] Boot: profile=ESP32_A252 bt_classic=true full_duplex=true",
+        "[RTC_BL_PHONE] Commands:",
+        "PING",
+        "HELP",
+        "STATUS",
+        "CALL",
+        "CAPTURE_START",
+        "CAPTURE_STOP",
+        "PLAY",
+        "RESET_METRICS",
+        "WIFI_CONNECT",
+        "WIFI_DISCONNECT",
+        "WIFI_STATUS",
+        "WIFI_SCAN",
+        "WIFI_RECONNECT",
+        "MQTT_CONFIG_SET",
+        "MQTT_CONNECT",
+        "MQTT_DISCONNECT",
+        "MQTT_STATUS",
+        "MQTT_PUB",
+        "ESPNOW_PEER_ADD",
+        "ESPNOW_PEER_DEL",
+        "ESPNOW_PEER_LIST",
+        "ESPNOW_STATUS",
+        "ESPNOW_SEND",
+        "BT_HFP_CONNECT",
+        "BT_HFP_DISCONNECT",
+        "BT_BLE_START",
+        "BT_BLE_STOP",
+        "BT_STATUS",
+        "SLIC_CONFIG_GET",
+        "SLIC_CONFIG_SET",
+        "AUDIO_CONFIG_GET",
+        "AUDIO_CONFIG_SET",
+        "PONG"
+      ]
+    },
+    "bt_status_before": {
+      "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"\",\"last_hfp_event\":\"initialized\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}",
+      "lines": [
+        "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"\",\"last_hfp_event\":\"initialized\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      ]
+    },
+    "hfp_connect_cmd": {
+      "result": "OK BT_HFP_CONNECT",
+      "lines": [
+        "OK BT_HFP_CONNECT"
+      ]
+    },
+    "hfp_status_poll": [
+      {
+        "t": 0,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"audio_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 2,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"audio_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 4,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 6,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 8,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 10,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 12,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 14,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 16,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 18,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 20,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      },
+      {
+        "t": 22,
+        "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      }
+    ],
+    "hfp_disconnect_cmd": {
+      "result": "OK BT_HFP_DISCONNECT",
+      "lines": [
+        "OK BT_HFP_DISCONNECT"
+      ]
+    },
+    "bt_status_after": {
+      "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnect_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}",
+      "lines": [
+        "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnect_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+      ]
+    }
+  }
+}

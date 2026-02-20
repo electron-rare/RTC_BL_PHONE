@@ -445,7 +445,8 @@ bool BluetoothManager::ensureBtStackReady() {
     memset(pin_code, 0, sizeof(pin_code));
     memcpy(pin_code, kLegacyPinCode, strlen(kLegacyPinCode));
     esp_bt_gap_set_pin(ESP_BT_PIN_TYPE_FIXED, 4, pin_code);
-    esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
+    // Keep classic BT connectable for outbound HFP while avoiding random inbound ACL grabs.
+    esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
 
     stack_ready_ = true;
     notifyBluetooth("stack_ready");
