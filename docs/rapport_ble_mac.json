@@ -1,0 +1,48 @@
+{
+  "timestamp_utc": "2026-02-20T20:47:49.473689+00:00",
+  "serial": {
+    "ping": "PONG",
+    "ble_start": "OK BT_BLE_START",
+    "bt_status_after_start": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":true,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"\",\"last_hfp_event\":\"initialized\",\"last_ble_event\":\"advertising\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+  },
+  "ble": {
+    "scan": [
+      {
+        "name": "Withings Aura 5E",
+        "address": "9214040A-F54E-37AC-4B4B-F609F94ECB5E",
+        "rssi": null
+      },
+      {
+        "name": "Bagage de Clément",
+        "address": "8E6D24D4-22CE-C8FC-FC6F-01090C567679",
+        "rssi": null
+      },
+      {
+        "name": "RTC_BL_PHONE_A252",
+        "address": "3DD63766-AF90-14D9-7964-F37AE7FB0704",
+        "rssi": null
+      },
+      {
+        "name": "Uscan 42",
+        "address": "98923C99-1897-8665-7EE6-647A96924DB7",
+        "rssi": null
+      },
+      {
+        "name": "GSM de clemsail",
+        "address": "CFCE5495-5537-1F54-1A77-7CF8CEC57FF3",
+        "rssi": null
+      }
+    ],
+    "target": {
+      "name": "RTC_BL_PHONE_A252",
+      "address": "3DD63766-AF90-14D9-7964-F37AE7FB0704"
+    },
+    "connected": true,
+    "services": [
+      "8fce0001-93ea-4f8f-8bde-4e8f0ea20001"
+    ],
+    "has_service": true,
+    "status_initial_raw": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":true,\"ble_client_connected\":true,\"security_enabled\":false,\"peer\":\"\",\"last_hfp_event\":\"initialized\",\"last_ble_event\":\"client_connected\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}",
+    "status_after_ping_raw": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":true,\"ble_client_connected\":true,\"security_enabled\":false,\"peer\":\"\",\"last_hfp_event\":\"initialized\",\"last_ble_event\":\"cmd\",\"last_error\":\"\",\"ble_last_command\":\"PING\",\"ble_last_response\":\"PONG\"}"
+  }
+}

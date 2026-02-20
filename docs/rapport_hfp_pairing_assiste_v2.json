@@ -1,0 +1,512 @@
+{
+  "timestamp_utc": "2026-02-20T20:57:01.244699+00:00",
+  "target": "B4:1B:B0:84:73:06",
+  "attempts": [
+    {
+      "attempt": 1,
+      "steps": [
+        {
+          "cmd": "BT_STATUS",
+          "resp": {
+            "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"\",\"last_hfp_event\":\"initialized\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}",
+            "lines": [
+              "[AudioEngine] ready (full_duplex=true)",
+              "[RTC_BL_PHONE] HW init slic=ok codec=ok audio=ok",
+              "[WebServerManager] HTTP server started",
+              "[RTC_BL_PHONE] Boot: profile=ESP32_A252 bt_classic=true full_duplex=true",
+              "[RTC_BL_PHONE] Commands:",
+              "PING",
+              "HELP",
+              "STATUS",
+              "CALL",
+              "CAPTURE_START",
+              "CAPTURE_STOP",
+              "PLAY",
+              "RESET_METRICS",
+              "WIFI_CONNECT",
+              "WIFI_DISCONNECT",
+              "WIFI_STATUS",
+              "WIFI_SCAN",
+              "WIFI_RECONNECT",
+              "MQTT_CONFIG_SET",
+              "MQTT_CONNECT",
+              "MQTT_DISCONNECT",
+              "MQTT_STATUS",
+              "MQTT_PUB",
+              "ESPNOW_PEER_ADD",
+              "ESPNOW_PEER_DEL",
+              "ESPNOW_PEER_LIST",
+              "ESPNOW_STATUS",
+              "ESPNOW_SEND",
+              "BT_HFP_CONNECT",
+              "BT_HFP_DISCONNECT",
+              "BT_BLE_START",
+              "BT_BLE_STOP",
+              "BT_STATUS",
+              "SLIC_CONFIG_GET",
+              "SLIC_CONFIG_SET",
+              "AUDIO_CONFIG_GET",
+              "AUDIO_CONFIG_SET",
+              "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"\",\"last_hfp_event\":\"initialized\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+            ]
+          }
+        },
+        {
+          "cmd": "BT_HFP_CONNECT",
+          "resp": {
+            "result": "OK BT_HFP_CONNECT",
+            "lines": [
+              "OK BT_HFP_CONNECT"
+            ]
+          }
+        },
+        {
+          "cmd": "BT_HFP_DISCONNECT",
+          "resp": {
+            "result": "OK BT_HFP_DISCONNECT",
+            "lines": [
+              "OK BT_HFP_DISCONNECT"
+            ]
+          }
+        }
+      ],
+      "timeline": [
+        {
+          "t_sec": 0,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"audio_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 2,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"audio_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 4,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"audio_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 6,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"audio_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 8,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"audio_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 10,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 12,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 14,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 16,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 18,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 20,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 22,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 24,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 26,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 28,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 30,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 32,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 34,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 36,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 38,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 40,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 42,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 44,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 46,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 48,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 50,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 52,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 54,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 56,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 58,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        }
+      ],
+      "connected": false,
+      "slc_or_audio": false
+    },
+    {
+      "attempt": 2,
+      "steps": [
+        {
+          "cmd": "BT_STATUS",
+          "resp": {
+            "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnect_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}",
+            "lines": [
+              "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnect_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+            ]
+          }
+        },
+        {
+          "cmd": "BT_HFP_CONNECT",
+          "resp": {
+            "result": "OK BT_HFP_CONNECT",
+            "lines": [
+              "OK BT_HFP_CONNECT"
+            ]
+          }
+        },
+        {
+          "cmd": "BT_HFP_DISCONNECT",
+          "resp": {
+            "result": "OK BT_HFP_DISCONNECT",
+            "lines": [
+              "OK BT_HFP_DISCONNECT"
+            ]
+          }
+        }
+      ],
+      "timeline": [
+        {
+          "t_sec": 0,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 2,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 4,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 6,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 8,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 10,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 12,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 14,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 16,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 18,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 20,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 22,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 24,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 26,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 28,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 30,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 32,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 34,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 36,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 38,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 40,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 42,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 44,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 46,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 48,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 50,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 52,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 54,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 56,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 58,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        }
+      ],
+      "connected": false,
+      "slc_or_audio": false
+    },
+    {
+      "attempt": 3,
+      "steps": [
+        {
+          "cmd": "BT_STATUS",
+          "resp": {
+            "result": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnect_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}",
+            "lines": [
+              "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":false,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnect_requested\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+            ]
+          }
+        },
+        {
+          "cmd": "BT_HFP_CONNECT",
+          "resp": {
+            "result": "OK BT_HFP_CONNECT",
+            "lines": [
+              "OK BT_HFP_CONNECT"
+            ]
+          }
+        },
+        {
+          "cmd": "BT_HFP_DISCONNECT",
+          "resp": {
+            "result": "OK BT_HFP_DISCONNECT",
+            "lines": [
+              "OK BT_HFP_DISCONNECT"
+            ]
+          }
+        }
+      ],
+      "timeline": [
+        {
+          "t_sec": 0,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 2,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 4,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 6,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 8,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 10,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 12,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 14,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 16,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 18,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 20,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 22,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 24,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 26,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 28,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 30,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 32,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 34,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 36,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 38,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 40,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 42,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 44,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 46,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 48,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 50,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 52,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 54,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 56,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        },
+        {
+          "t_sec": 58,
+          "resp": "{\"stack_ready\":true,\"connected\":false,\"hfp_active\":false,\"hfp_requested\":true,\"ble_active\":false,\"ble_client_connected\":false,\"security_enabled\":false,\"peer\":\"B4:1B:B0:84:73:06\",\"last_hfp_event\":\"disconnected\",\"last_ble_event\":\"initialized\",\"last_error\":\"\",\"ble_last_command\":\"\",\"ble_last_response\":\"\"}"
+        }
+      ],
+      "connected": false,
+      "slc_or_audio": false
+    }
+  ],
+  "success": false
+}
