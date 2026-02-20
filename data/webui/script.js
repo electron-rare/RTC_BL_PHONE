@@ -51,6 +51,14 @@ function jsonHeaders() {
   return { "Content-Type": "application/json" };
 }
 
+function parseJsonInput(id) {
+  const raw = document.getElementById(id).value.trim();
+  if (!raw) {
+    return {};
+  }
+  return JSON.parse(raw);
+}
+
 function parsePayloadValue(rawPayload) {
   const trimmed = rawPayload.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -90,6 +98,18 @@ async function refreshConfig() {
       requestJson("/api/config/mqtt"),
     ]);
     setJson("configJson", { pins, audio, mqtt });
+    const audioInput = document.getElementById("audioConfigInput");
+    const mqttInput = document.getElementById("mqttConfigInput");
+    const pinsInput = document.getElementById("pinsConfigInput");
+    if (audioInput) {
+      audioInput.value = JSON.stringify(audio, null, 2);
+    }
+    if (mqttInput) {
+      mqttInput.value = JSON.stringify(mqtt.config || mqtt, null, 2);
+    }
+    if (pinsInput) {
+      pinsInput.value = JSON.stringify(pins, null, 2);
+    }
   } catch (error) {
     setJson("configJson", { error: error.message });
   }
@@ -116,6 +136,15 @@ async function refreshNetwork() {
   }
 }
 
+async function refreshBluetooth() {
+  try {
+    const bt = await requestJson("/api/bluetooth");
+    setJson("btJson", bt);
+  } catch (error) {
+    setJson("btJson", { error: error.message });
+  }
+}
+
 async function sendControl(action) {
   const result = await requestJson("/api/control", {
     method: "POST",
@@ -137,6 +166,52 @@ function bindEvents() {
   });
   document.getElementById("refreshConfigBtn").addEventListener("click", refreshConfig);
   document.getElementById("espnowRefreshBtn").addEventListener("click", refreshNetwork);
+  document.getElementById("btRefreshBtn").addEventListener("click", refreshBluetooth);
+
+  document.getElementById("applyAudioConfigBtn").addEventListener("click", async () => {
+    try {
+      const payload = parseJsonInput("audioConfigInput");
+      const result = await requestJson("/api/config/audio", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify(payload),
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshConfig(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("applyMqttConfigBtn").addEventListener("click", async () => {
+    try {
+      const payload = parseJsonInput("mqttConfigInput");
+      const result = await requestJson("/api/config/mqtt", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify(payload),
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshConfig(), refreshNetwork(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("applyPinsConfigBtn").addEventListener("click", async () => {
+    try {
+      const payload = parseJsonInput("pinsConfigInput");
+      const result = await requestJson("/api/config/pins", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify(payload),
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshConfig(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
 
   document.getElementById("wifiConnectForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -319,6 +394,64 @@ function bindEvents() {
     }
   });
 
+  document.getElementById("btHfpConnectForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const addr = document.getElementById("btHfpAddr").value.trim();
+    try {
+      const result = await requestJson("/api/bluetooth/hfp/connect", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ addr }),
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshBluetooth(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("btHfpDisconnectBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/bluetooth/hfp/disconnect", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshBluetooth(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("btBleStartBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/bluetooth/ble/start", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshBluetooth(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("btBleStopBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/bluetooth/ble/stop", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshBluetooth(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
   document.querySelectorAll("#controlSection button[data-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       try {
@@ -342,6 +475,6 @@ function bindEvents() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
-  await Promise.all([refreshStatus(), refreshConfig(), refreshNetwork()]);
+  await Promise.all([refreshStatus(), refreshConfig(), refreshNetwork(), refreshBluetooth()]);
   showSection("dashboard");
 });
