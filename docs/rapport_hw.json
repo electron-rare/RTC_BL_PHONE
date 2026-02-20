@@ -1,6 +1,6 @@
 {
-  "timestamp_utc": "2026-02-20T19:25:32.067793+00:00",
-  "overall_passed": true,
+  "timestamp_utc": "2026-02-20T20:33:53.045753+00:00",
+  "overall_passed": false,
   "results": [
     {
       "name": "serial_smoke",
@@ -30,12 +30,16 @@
             "latence_ms": 0
           },
           "wifi": {
-            "connected": false,
-            "has_credentials": false,
-            "ssid": "",
-            "ip": "0.0.0.0",
-            "rssi": 0,
-            "state": "disconnected"
+            "connected": true,
+            "has_credentials": true,
+            "ssid": "Les cils",
+            "ip": "192.168.0.103",
+            "rssi": -79,
+            "state": "connected",
+            "ap_active": false,
+            "ap_ssid": "",
+            "ap_ip": "0.0.0.0",
+            "mode": "sta"
           },
           "mqtt": {
             "enabled": false,
@@ -123,47 +127,73 @@
       "state": "PASS",
       "details": {
         "wifi_status_before": {
-          "connected": false,
-          "has_credentials": false,
-          "ssid": "",
-          "ip": "0.0.0.0",
-          "rssi": 0,
-          "state": "disconnected"
+          "connected": true,
+          "has_credentials": true,
+          "ssid": "Les cils",
+          "ip": "192.168.0.103",
+          "rssi": -79,
+          "state": "connected",
+          "ap_active": false,
+          "ap_ssid": "",
+          "ap_ip": "0.0.0.0",
+          "mode": "sta"
         },
         "wifi_scan": {
           "ok": true,
           "networks": [
             {
               "ssid": "Les cils",
-              "rssi": -50,
+              "rssi": -57,
               "chan": 11,
               "enc": 4
             },
             {
               "ssid": "CILS House",
-              "rssi": -66,
-              "chan": 7,
+              "rssi": -69,
+              "chan": 9,
               "enc": 7
             },
             {
               "ssid": "Les cils",
-              "rssi": -68,
+              "rssi": -72,
               "chan": 6,
               "enc": 3
             },
             {
+              "ssid": "Les cils",
+              "rssi": -78,
+              "chan": 1,
+              "enc": 4
+            },
+            {
               "ssid": "La-clic",
-              "rssi": -77,
+              "rssi": -85,
               "chan": 1,
               "enc": 3
             },
             {
               "ssid": "venus-HQ203587TYP-031",
-              "rssi": -85,
+              "rssi": -87,
               "chan": 1,
               "enc": 3
             }
           ]
+        },
+        "wifi_connect": {
+          "ok": true,
+          "line": "SKIP WIFI_CONNECT already_connected"
+        },
+        "wifi_status_after": {
+          "connected": true,
+          "has_credentials": true,
+          "ssid": "Les cils",
+          "ip": "192.168.0.103",
+          "rssi": -79,
+          "state": "connected",
+          "ap_active": false,
+          "ap_ssid": "",
+          "ap_ip": "0.0.0.0",
+          "mode": "sta"
         },
         "mqtt_status": {
           "enabled": false,
@@ -200,37 +230,178 @@
     },
     {
       "name": "http_endpoints",
-      "state": "MANUAL_SKIP",
+      "state": "PASS",
       "details": {
-        "note": "base URL not provided"
+        "base_url": "http://192.168.0.103",
+        "status": {
+          "board_profile": "ESP32_A252",
+          "telephony": {
+            "state": "RINGING",
+            "hook": "ON_HOOK"
+          },
+          "audio_frames_requested": 0,
+          "audio_frames_read": 0,
+          "audio_drop_frames": 0,
+          "audio_underrun_count": 0,
+          "audio_last_latency_ms": 0,
+          "audio_max_latency_ms": 0,
+          "audio": {
+            "full_duplex": true,
+            "frames": 0,
+            "underrun": 0,
+            "drop": 0,
+            "latence_ms": 0
+          },
+          "wifi": {
+            "connected": true,
+            "has_credentials": true,
+            "ssid": "Les cils",
+            "ip": "192.168.0.103",
+            "rssi": -82,
+            "state": "connected",
+            "ap_active": false,
+            "ap_ssid": "",
+            "ap_ip": "0.0.0.0",
+            "mode": "sta"
+          },
+          "mqtt": {
+            "enabled": false,
+            "connected": false,
+            "host": "",
+            "port": 1883,
+            "base_topic": "rtc_bl_phone/a252",
+            "reconnect_attempts": 0
+          },
+          "espnow": {
+            "ready": true,
+            "peer_count": 0,
+            "tx_ok": 0,
+            "tx_fail": 0,
+            "rx_count": 0,
+            "last_rx_mac": "",
+            "peers": []
+          },
+          "bluetooth": {
+            "connected": false,
+            "hfp_active": false,
+            "ble_active": false,
+            "security_enabled": false,
+            "peer": ""
+          },
+          "config": {
+            "pins": {
+              "i2s": {
+                "bck": 27,
+                "ws": 25,
+                "dout": 26,
+                "din": 35
+              },
+              "codec_i2c": {
+                "sda": 33,
+                "scl": 32
+              },
+              "slic": {
+                "rm": 22,
+                "fr": 19,
+                "shk": 36,
+                "line": 23,
+                "pd": 18,
+                "hook_active_high": false
+              }
+            },
+            "audio": {
+              "sample_rate": 16000,
+              "bits_per_sample": 16,
+              "enable_capture": true,
+              "volume": 80,
+              "mute": false,
+              "route": "rtc"
+            },
+            "mqtt": {
+              "enabled": false,
+              "host": "",
+              "port": 1883,
+              "user": "",
+              "base_topic": "rtc_bl_phone/a252"
+            },
+            "espnow_peers": []
+          }
+        },
+        "wifi": {
+          "connected": true,
+          "has_credentials": true,
+          "ssid": "Les cils",
+          "ip": "192.168.0.103",
+          "rssi": -73,
+          "state": "connected",
+          "ap_active": false,
+          "ap_ssid": "",
+          "ap_ip": "0.0.0.0",
+          "mode": "sta"
+        },
+        "mqtt": {
+          "enabled": false,
+          "connected": false,
+          "host": "",
+          "port": 1883,
+          "base_topic": "rtc_bl_phone/a252",
+          "reconnect_attempts": 0,
+          "config": {
+            "enabled": false,
+            "host": "",
+            "port": 1883,
+            "user": "",
+            "base_topic": "rtc_bl_phone/a252"
+          }
+        },
+        "espnow": {
+          "ready": true,
+          "peer_count": 0,
+          "tx_ok": 0,
+          "tx_fail": 0,
+          "rx_count": 0,
+          "last_rx_mac": "",
+          "peers": []
+        },
+        "bluetooth": {
+          "connected": false,
+          "hfp_active": false,
+          "ble_active": false,
+          "security_enabled": false,
+          "peer": ""
+        },
+        "control_call": {
+          "ok": true,
+          "code": "CALL"
+        }
       }
     },
     {
       "name": "manual_hook_transition",
-      "state": "MANUAL_SKIP",
+      "state": "MANUAL_FAIL",
       "details": {
-        "note": "validated manually"
+        "note": "manual terminal run: voir docs/rapport_manual_terminal_bt.json + .md"
       }
     },
     {
       "name": "manual_ring_behavior",
-      "state": "MANUAL_SKIP",
+      "state": "MANUAL_PASS",
       "details": {
-        "note": "validated manually"
+        "note": "manual terminal run: voir docs/rapport_manual_terminal_bt.json + .md"
       }
     },
     {
       "name": "manual_audio_path",
-      "state": "MANUAL_SKIP",
+      "state": "MANUAL_FAIL",
       "details": {
-        "note": "validated manually"
+        "note": "manual terminal run: voir docs/rapport_manual_terminal_bt.json + .md"
       }
     },
     {
       "name": "manual_hfp_pairing",
-      "state": "MANUAL_SKIP",
+      "state": "MANUAL_FAIL",
       "details": {
-        "note": "validated manually"
+        "note": "manual terminal run: voir docs/rapport_manual_terminal_bt.json + .md"
       }
     }
   ]

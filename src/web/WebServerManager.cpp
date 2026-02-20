@@ -4,6 +4,13 @@
 
 namespace {
 constexpr bool kForceAuthDisabled = true;
+
+String quoteArg(const String& value) {
+    String escaped = value;
+    escaped.replace("\\", "\\\\");
+    escaped.replace("\"", "\\\"");
+    return String("\"") + escaped + "\"";
+}
 }
 
 WebServerManager::WebServerManager(uint16_t port)
@@ -137,7 +144,7 @@ void WebServerManager::registerRoutes() {
             request->send(400, "application/json", "{\"error\":\"invalid ssid\"}");
             return;
         }
-        handleDispatch(request, "WIFI_CONNECT " + ssid + " " + pass);
+        handleDispatch(request, "WIFI_CONNECT " + quoteArg(ssid) + " " + quoteArg(pass));
     });
     server_.on("/api/network/wifi/disconnect", HTTP_POST,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "WIFI_DISCONNECT"); });

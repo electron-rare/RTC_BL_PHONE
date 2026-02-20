@@ -63,6 +63,39 @@ bool splitFirstToken(const String& input, String& first, String& rest) {
         return false;
     }
 
+    if (work[0] == '"') {
+        bool escaped = false;
+        int close_index = -1;
+        for (int i = 1; i < work.length(); ++i) {
+            const char c = work[i];
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (c == '"') {
+                close_index = i;
+                break;
+            }
+        }
+        if (close_index < 0) {
+            first = "";
+            rest = "";
+            return false;
+        }
+
+        String token = work.substring(1, close_index);
+        token.replace("\\\"", "\"");
+        token.replace("\\\\", "\\");
+        first = token;
+        rest = work.substring(close_index + 1);
+        rest.trim();
+        return true;
+    }
+
     const int sep = work.indexOf(' ');
     if (sep < 0) {
         first = work;
@@ -341,6 +374,21 @@ DispatchResponse executeCommandLine(const String& line) {
     return g_dispatcher.dispatch(line);
 }
 
+String responseToText(const DispatchResponse& res) {
+    if (!res.raw.isEmpty()) {
+        return res.raw;
+    }
+    if (!res.json.isEmpty()) {
+        return res.json;
+    }
+    String out = res.ok ? "OK" : "ERR";
+    if (!res.code.isEmpty()) {
+        out += " ";
+        out += res.code;
+    }
+    return out;
+}
+
 void registerCommands() {
     g_dispatcher.registerCommand("PING", [](const String&) {
         DispatchResponse res;
@@ -388,10 +436,20 @@ void registerCommands() {
 
     g_dispatcher.registerCommand("WIFI_CONNECT", [](const String& args) {
         String ssid;
-        String password;
-        if (!splitFirstToken(args, ssid, password) || ssid.isEmpty()) {
+        String password_raw;
+        if (!splitFirstToken(args, ssid, password_raw) || ssid.isEmpty()) {
             return makeResponse(false, "WIFI_CONNECT invalid_args");
         }
+
+        String password = password_raw;
+        if (!password_raw.isEmpty()) {
+            String parsed;
+            String remaining;
+            if (splitFirstToken(password_raw, parsed, remaining) && remaining.isEmpty()) {
+                password = parsed;
+            }
+        }
+
         const bool ok = g_wifi.connect(ssid, password, 10000, true);
         return makeResponse(ok, "WIFI_CONNECT");
     });
@@ -700,6 +758,10 @@ void setup() {
     applyHardwareConfig();
     registerCommands();
 
+    g_bt.setBleCommandHandler([](const String& cmd) {
+        return responseToText(executeCommandLine(cmd));
+    });
+
     g_bt.begin(g_profile);
 
     g_mqtt.begin(g_mqtt_cfg);
@@ -719,6 +781,8 @@ void setup() {
         if (g_wifi.isConnected() && g_mqtt_cfg.enabled) {
             g_mqtt.connectNow();
         }
+    } else {
+        g_wifi.ensureFallbackAp();
     }
 
     g_web.setRateLimitMs(250);

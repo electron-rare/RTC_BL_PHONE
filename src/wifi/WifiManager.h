@@ -11,6 +11,10 @@ struct WifiStatusSnapshot {
     String ip;
     int32_t rssi = 0;
     String state;
+    bool ap_active = false;
+    String ap_ssid;
+    String ap_ip;
+    String mode;
 };
 
 class WifiManager {
@@ -23,6 +27,7 @@ public:
     bool reconnect(uint32_t timeout_ms = 10000);
     void disconnect(bool erase_credentials = false);
     void loop();
+    void ensureFallbackAp();
 
     bool isConnected() const;
     bool hasCredentials() const;
@@ -34,9 +39,14 @@ private:
     bool connected_;
     String ssid_;
     String password_;
+    bool ap_active_;
+    String ap_ssid_;
+    String ap_password_;
     mutable uint32_t next_auto_reconnect_ms_;
     uint32_t reconnect_backoff_ms_;
 
+    bool startFallbackAp();
+    void stopFallbackAp();
     bool waitForConnection(uint32_t timeout_ms);
 };
 

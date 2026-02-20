@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib import error, request
+from urllib import error, parse, request
 
 try:
     import serial  # type: ignore
@@ -50,7 +50,7 @@ class SerialEndpoint:
 
     def __enter__(self) -> "SerialEndpoint":
         self._ser = serial.Serial(self.port, self.baud, timeout=self.timeout_s)
-        time.sleep(0.3)
+        time.sleep(0.8)
         self._ser.reset_input_buffer()
         self._ser.reset_output_buffer()
         return self
@@ -59,9 +59,10 @@ class SerialEndpoint:
         if self._ser and self._ser.is_open:
             self._ser.close()
 
-    def command(self, cmd: str, timeout_s: float = 6.0) -> Dict[str, Any]:
+    def command(self, cmd: str, timeout_s: float = 6.0, expect: str = "any") -> Dict[str, Any]:
         if not self._ser or not self._ser.is_open:
             raise RuntimeError("serial port not open")
+        self._ser.reset_input_buffer()
         self._ser.write((cmd + "\r\n").encode())
         self._ser.flush()
 
@@ -77,15 +78,32 @@ class SerialEndpoint:
             last_line = line
             print(f"[{self.port}] {line}")
             if line.startswith("{") and line.endswith("}"):
-                try:
-                    return json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+                if expect in {"any", "json"}:
+                    try:
+                        return json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                continue
             if line.startswith("OK ") or line.startswith("ERR "):
-                return {"ok": line.startswith("OK "), "line": line}
+                if expect in {"any", "ack"}:
+                    return {"ok": line.startswith("OK "), "line": line}
+                continue
             if line == "PONG":
-                return {"ok": True, "result": "PONG"}
+                if expect in {"any", "pong", "ack"}:
+                    return {"ok": True, "result": "PONG"}
+                continue
         raise RuntimeError(f"timeout on command '{cmd}' last='{last_line}'")
+
+    def sync(self, retries: int = 6) -> None:
+        last_error = ""
+        for _ in range(retries):
+            try:
+                self.command("PING", timeout_s=2.0, expect="pong")
+                return
+            except Exception as exc:  # pragma: no cover - hardware timing
+                last_error = str(exc)
+                time.sleep(0.5)
+        raise RuntimeError(f"serial sync failed: {last_error}")
 
 
 def fetch_json(url: str) -> Dict[str, Any]:
@@ -95,25 +113,39 @@ def fetch_json(url: str) -> Dict[str, Any]:
 
 
 def post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    raw = json.dumps(payload)
     req = request.Request(
         url,
         method="POST",
-        data=json.dumps(payload).encode("utf-8"),
+        data=raw.encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    with request.urlopen(req, timeout=5) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        if exc.code != 400:
+            raise
+        # Fallback for endpoints implemented with AsyncWebServer "plain" body extraction.
+        fallback = request.Request(
+            url,
+            method="POST",
+            data=parse.urlencode({"plain": raw}).encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with request.urlopen(fallback, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
 
 def scenario_serial_smoke(dev: SerialEndpoint) -> ScenarioResult:
     details: Dict[str, Any] = {}
     try:
-        details["ping"] = dev.command("PING")
-        details["status"] = dev.command("STATUS")
-        details["call"] = dev.command("CALL")
-        details["capture_start"] = dev.command("CAPTURE_START")
-        details["capture_stop"] = dev.command("CAPTURE_STOP")
-        details["reset_metrics"] = dev.command("RESET_METRICS")
+        details["ping"] = dev.command("PING", expect="pong")
+        details["status"] = dev.command("STATUS", expect="json")
+        details["call"] = dev.command("CALL", expect="ack")
+        details["capture_start"] = dev.command("CAPTURE_START", expect="ack")
+        details["capture_stop"] = dev.command("CAPTURE_STOP", expect="ack")
+        details["reset_metrics"] = dev.command("RESET_METRICS", expect="ack")
         ok = bool(details["ping"].get("ok")) and "telephony" in details["status"]
         return ScenarioResult("serial_smoke", "PASS" if ok else "FAIL", details)
     except Exception as exc:
@@ -126,18 +158,35 @@ def _is_success_response(resp: Dict[str, Any]) -> bool:
     return True
 
 
+def _quote_arg(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def scenario_serial_network(dev: SerialEndpoint, wifi_ssid: str, wifi_password: str) -> ScenarioResult:
     details: Dict[str, Any] = {}
     try:
-        details["wifi_status_before"] = dev.command("WIFI_STATUS")
-        details["wifi_scan"] = dev.command("WIFI_SCAN")
+        details["wifi_status_before"] = dev.command("WIFI_STATUS", expect="json")
+        details["wifi_scan"] = dev.command("WIFI_SCAN", expect="json")
         if wifi_ssid:
-            details["wifi_connect"] = dev.command(f"WIFI_CONNECT {wifi_ssid} {wifi_password}")
-            time.sleep(1.0)
-            details["wifi_status_after"] = dev.command("WIFI_STATUS")
-        details["mqtt_status"] = dev.command("MQTT_STATUS")
-        details["espnow_status"] = dev.command("ESPNOW_STATUS")
-        details["bt_status"] = dev.command("BT_STATUS")
+            already_connected = (
+                bool(details["wifi_status_before"].get("connected"))
+                and str(details["wifi_status_before"].get("ssid", "")) == wifi_ssid
+            )
+            if already_connected:
+                details["wifi_connect"] = {"ok": True, "line": "SKIP WIFI_CONNECT already_connected"}
+                details["wifi_status_after"] = details["wifi_status_before"]
+            else:
+                details["wifi_connect"] = dev.command(
+                    f"WIFI_CONNECT {_quote_arg(wifi_ssid)} {_quote_arg(wifi_password)}",
+                    timeout_s=20.0,
+                    expect="ack",
+                )
+                time.sleep(2.0)
+                details["wifi_status_after"] = dev.command("WIFI_STATUS", expect="json")
+        details["mqtt_status"] = dev.command("MQTT_STATUS", expect="json")
+        details["espnow_status"] = dev.command("ESPNOW_STATUS", expect="json")
+        details["bt_status"] = dev.command("BT_STATUS", expect="json")
         ok = True
         for value in details.values():
             if isinstance(value, dict) and not _is_success_response(value):
@@ -225,16 +274,25 @@ def main() -> int:
         run_cmd(["pio", "run", "-e", "esp32dev", "-t", "upload", "--upload-port", args.port_a252])
 
     results: List[ScenarioResult] = []
+    network_result: Optional[ScenarioResult] = None
 
     try:
         with SerialEndpoint(args.port_a252, args.baud) as dev:
+            dev.sync()
             results.append(scenario_serial_smoke(dev))
-            results.append(scenario_serial_network(dev, args.wifi_ssid, args.wifi_password))
+            network_result = scenario_serial_network(dev, args.wifi_ssid, args.wifi_password)
+            results.append(network_result)
     except Exception as exc:
         results.append(ScenarioResult("serial_runner", "FAIL", {"error": str(exc)}))
 
-    if args.base_url:
-        results.append(scenario_http(args.base_url))
+    runtime_base_url = args.base_url.strip()
+    if network_result and isinstance(network_result.details, dict):
+        wifi_after = network_result.details.get("wifi_status_after")
+        if isinstance(wifi_after, dict) and wifi_after.get("connected") and wifi_after.get("ip"):
+            runtime_base_url = f"http://{wifi_after['ip']}"
+
+    if runtime_base_url:
+        results.append(scenario_http(runtime_base_url))
     else:
         results.append(ScenarioResult("http_endpoints", "MANUAL_SKIP", {"note": "base URL not provided"}))
 

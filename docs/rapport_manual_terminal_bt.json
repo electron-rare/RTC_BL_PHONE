@@ -1,0 +1,374 @@
+{
+  "timestamp_utc": "2026-02-20T20:32:52.137481+00:00",
+  "port": "/dev/cu.usbserial-0001",
+  "hfp_mac_tested": "B4:1B:B0:84:73:06",
+  "steps": {
+    "ping": {
+      "type": "pong",
+      "value": "PONG"
+    },
+    "status_before": {
+      "type": "json",
+      "value": {
+        "board_profile": "ESP32_A252",
+        "telephony": {
+          "state": "IDLE",
+          "hook": "ON_HOOK"
+        },
+        "audio_frames_requested": 0,
+        "audio_frames_read": 0,
+        "audio_drop_frames": 0,
+        "audio_underrun_count": 0,
+        "audio_last_latency_ms": 0,
+        "audio_max_latency_ms": 0,
+        "audio": {
+          "full_duplex": true,
+          "frames": 0,
+          "underrun": 0,
+          "drop": 0,
+          "latence_ms": 0
+        },
+        "wifi": {
+          "connected": true,
+          "has_credentials": true,
+          "ssid": "Les cils",
+          "ip": "192.168.0.103",
+          "rssi": -70,
+          "state": "connected",
+          "ap_active": false,
+          "ap_ssid": "",
+          "ap_ip": "0.0.0.0",
+          "mode": "sta"
+        },
+        "mqtt": {
+          "enabled": false,
+          "connected": false,
+          "host": "",
+          "port": 1883,
+          "base_topic": "rtc_bl_phone/a252",
+          "reconnect_attempts": 0
+        },
+        "espnow": {
+          "ready": true,
+          "peer_count": 0,
+          "tx_ok": 0,
+          "tx_fail": 0,
+          "rx_count": 0,
+          "last_rx_mac": "",
+          "peers": []
+        },
+        "bluetooth": {
+          "connected": false,
+          "hfp_active": false,
+          "ble_active": false,
+          "security_enabled": false,
+          "peer": ""
+        },
+        "config": {
+          "pins": {
+            "i2s": {
+              "bck": 27,
+              "ws": 25,
+              "dout": 26,
+              "din": 35
+            },
+            "codec_i2c": {
+              "sda": 33,
+              "scl": 32
+            },
+            "slic": {
+              "rm": 22,
+              "fr": 19,
+              "shk": 36,
+              "line": 23,
+              "pd": 18,
+              "hook_active_high": false
+            }
+          },
+          "audio": {
+            "sample_rate": 16000,
+            "bits_per_sample": 16,
+            "enable_capture": true,
+            "volume": 80,
+            "mute": false,
+            "route": "rtc"
+          },
+          "mqtt": {
+            "enabled": false,
+            "host": "",
+            "port": 1883,
+            "user": "",
+            "base_topic": "rtc_bl_phone/a252"
+          },
+          "espnow_peers": []
+        }
+      }
+    },
+    "call": {
+      "type": "ack",
+      "value": "OK CALL"
+    },
+    "status_after_call": {
+      "type": "json",
+      "value": {
+        "board_profile": "ESP32_A252",
+        "telephony": {
+          "state": "RINGING",
+          "hook": "ON_HOOK"
+        },
+        "audio_frames_requested": 0,
+        "audio_frames_read": 0,
+        "audio_drop_frames": 0,
+        "audio_underrun_count": 0,
+        "audio_last_latency_ms": 0,
+        "audio_max_latency_ms": 0,
+        "audio": {
+          "full_duplex": true,
+          "frames": 0,
+          "underrun": 0,
+          "drop": 0,
+          "latence_ms": 0
+        },
+        "wifi": {
+          "connected": true,
+          "has_credentials": true,
+          "ssid": "Les cils",
+          "ip": "192.168.0.103",
+          "rssi": -72,
+          "state": "connected",
+          "ap_active": false,
+          "ap_ssid": "",
+          "ap_ip": "0.0.0.0",
+          "mode": "sta"
+        },
+        "mqtt": {
+          "enabled": false,
+          "connected": false,
+          "host": "",
+          "port": 1883,
+          "base_topic": "rtc_bl_phone/a252",
+          "reconnect_attempts": 0
+        },
+        "espnow": {
+          "ready": true,
+          "peer_count": 0,
+          "tx_ok": 0,
+          "tx_fail": 0,
+          "rx_count": 0,
+          "last_rx_mac": "",
+          "peers": []
+        },
+        "bluetooth": {
+          "connected": false,
+          "hfp_active": false,
+          "ble_active": false,
+          "security_enabled": false,
+          "peer": ""
+        },
+        "config": {
+          "pins": {
+            "i2s": {
+              "bck": 27,
+              "ws": 25,
+              "dout": 26,
+              "din": 35
+            },
+            "codec_i2c": {
+              "sda": 33,
+              "scl": 32
+            },
+            "slic": {
+              "rm": 22,
+              "fr": 19,
+              "shk": 36,
+              "line": 23,
+              "pd": 18,
+              "hook_active_high": false
+            }
+          },
+          "audio": {
+            "sample_rate": 16000,
+            "bits_per_sample": 16,
+            "enable_capture": true,
+            "volume": 80,
+            "mute": false,
+            "route": "rtc"
+          },
+          "mqtt": {
+            "enabled": false,
+            "host": "",
+            "port": 1883,
+            "user": "",
+            "base_topic": "rtc_bl_phone/a252"
+          },
+          "espnow_peers": []
+        }
+      }
+    },
+    "capture_start": {
+      "type": "ack",
+      "value": "OK CAPTURE_START"
+    },
+    "capture_stop": {
+      "type": "ack",
+      "value": "OK CAPTURE_STOP"
+    },
+    "play_welcome": {
+      "type": "ack",
+      "value": "OK PLAY"
+    },
+    "status_after_audio": {
+      "type": "json",
+      "value": {
+        "board_profile": "ESP32_A252",
+        "telephony": {
+          "state": "RINGING",
+          "hook": "ON_HOOK"
+        },
+        "audio_frames_requested": 0,
+        "audio_frames_read": 0,
+        "audio_drop_frames": 0,
+        "audio_underrun_count": 0,
+        "audio_last_latency_ms": 0,
+        "audio_max_latency_ms": 0,
+        "audio": {
+          "full_duplex": true,
+          "frames": 0,
+          "underrun": 0,
+          "drop": 0,
+          "latence_ms": 0
+        },
+        "wifi": {
+          "connected": true,
+          "has_credentials": true,
+          "ssid": "Les cils",
+          "ip": "192.168.0.103",
+          "rssi": -73,
+          "state": "connected",
+          "ap_active": false,
+          "ap_ssid": "",
+          "ap_ip": "0.0.0.0",
+          "mode": "sta"
+        },
+        "mqtt": {
+          "enabled": false,
+          "connected": false,
+          "host": "",
+          "port": 1883,
+          "base_topic": "rtc_bl_phone/a252",
+          "reconnect_attempts": 0
+        },
+        "espnow": {
+          "ready": true,
+          "peer_count": 0,
+          "tx_ok": 0,
+          "tx_fail": 0,
+          "rx_count": 0,
+          "last_rx_mac": "",
+          "peers": []
+        },
+        "bluetooth": {
+          "connected": false,
+          "hfp_active": false,
+          "ble_active": false,
+          "security_enabled": false,
+          "peer": ""
+        },
+        "config": {
+          "pins": {
+            "i2s": {
+              "bck": 27,
+              "ws": 25,
+              "dout": 26,
+              "din": 35
+            },
+            "codec_i2c": {
+              "sda": 33,
+              "scl": 32
+            },
+            "slic": {
+              "rm": 22,
+              "fr": 19,
+              "shk": 36,
+              "line": 23,
+              "pd": 18,
+              "hook_active_high": false
+            }
+          },
+          "audio": {
+            "sample_rate": 16000,
+            "bits_per_sample": 16,
+            "enable_capture": true,
+            "volume": 80,
+            "mute": false,
+            "route": "rtc"
+          },
+          "mqtt": {
+            "enabled": false,
+            "host": "",
+            "port": 1883,
+            "user": "",
+            "base_topic": "rtc_bl_phone/a252"
+          },
+          "espnow_peers": []
+        }
+      }
+    },
+    "bt_status_before": {
+      "type": "json",
+      "value": {
+        "connected": false,
+        "hfp_active": false,
+        "ble_active": false,
+        "security_enabled": false,
+        "peer": ""
+      }
+    },
+    "bt_ble_start": {
+      "type": "ack",
+      "value": "OK BT_BLE_START"
+    },
+    "bt_status_ble_on": {
+      "type": "json",
+      "value": {
+        "connected": false,
+        "hfp_active": false,
+        "ble_active": true,
+        "security_enabled": false,
+        "peer": ""
+      }
+    },
+    "bt_hfp_connect": {
+      "type": "ack",
+      "value": "OK BT_HFP_CONNECT"
+    },
+    "bt_status_hfp_on": {
+      "type": "json",
+      "value": {
+        "connected": true,
+        "hfp_active": true,
+        "ble_active": true,
+        "security_enabled": false,
+        "peer": "B4:1B:B0:84:73:06"
+      }
+    },
+    "bt_hfp_disconnect": {
+      "type": "ack",
+      "value": "OK BT_HFP_DISCONNECT"
+    },
+    "bt_ble_stop": {
+      "type": "ack",
+      "value": "OK BT_BLE_STOP"
+    },
+    "bt_status_after": {
+      "type": "json",
+      "value": {
+        "connected": false,
+        "hfp_active": false,
+        "ble_active": false,
+        "security_enabled": false,
+        "peer": "B4:1B:B0:84:73:06"
+      }
+    }
+  }
+}
