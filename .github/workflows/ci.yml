@@ -19,6 +19,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Test Web Route Parity Parser
+        run: python3 -m unittest scripts/test_check_web_route_parity.py
+
       - name: Check Web Route Parity
         run: python3 scripts/check_web_route_parity.py
 

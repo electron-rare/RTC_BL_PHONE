@@ -15,10 +15,8 @@ Route = tuple[str, str]
 BACKEND_ROUTE_RE = re.compile(
     r'server_\.on\(\s*"(?P<path>/api/[^"]+)"\s*,\s*HTTP_(?P<method>[A-Z]+)'
 )
-FRONTEND_CALL_RE = re.compile(
-    r'requestJson\(\s*["\'](?P<path>/api/[^"\']+)["\'](?P<args>.*?)\);',
-    re.DOTALL,
-)
+FRONTEND_CALL_START_RE = re.compile(r"\brequestJson\(")
+FRONTEND_PATH_ARG_RE = re.compile(r'^\s*(["\'])(?P<path>/api/[^"\']+)\1')
 METHOD_RE = re.compile(r'method\s*:\s*["\'](?P<method>[A-Z]+)["\']')
 
 
@@ -31,11 +29,54 @@ def parse_backend_routes(source: str) -> set[Route]:
     return routes
 
 
+def find_matching_paren(source: str, open_paren_index: int) -> int:
+    depth = 1
+    in_string: str | None = None
+    escaped = False
+
+    for index in range(open_paren_index + 1, len(source)):
+        char = source[index]
+
+        if in_string is not None:
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+                continue
+            if char == in_string:
+                in_string = None
+            continue
+
+        if char in ('"', "'", "`"):
+            in_string = char
+            continue
+
+        if char == "(":
+            depth += 1
+            continue
+        if char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+
+    return -1
+
+
 def parse_frontend_routes(source: str) -> set[Route]:
     routes: set[Route] = set()
-    for match in FRONTEND_CALL_RE.finditer(source):
-        path = match.group("path")
-        args = match.group("args")
+    for match in FRONTEND_CALL_START_RE.finditer(source):
+        open_paren = match.end() - 1
+        close_paren = find_matching_paren(source, open_paren)
+        if close_paren < 0:
+            continue
+
+        args = source[open_paren + 1 : close_paren]
+        path_match = FRONTEND_PATH_ARG_RE.match(args)
+        if not path_match:
+            continue
+
+        path = path_match.group("path")
         method_match = METHOD_RE.search(args)
         method = method_match.group("method").upper() if method_match else "GET"
         routes.add((method, path))
