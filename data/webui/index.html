@@ -3,63 +3,99 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RTC_BL_PHONE WebUI</title>
+  <title>RTC_BL_PHONE Web UI</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
-    <h1>RTC_BL_PHONE Dashboard</h1>
-    <p id="status">Chargement...</p>
+    <h1>RTC_BL_PHONE Web UI</h1>
+    <p id="statusLine">Chargement...</p>
   </header>
 
   <nav>
-    <button data-section="contacts">Annuaire</button>
+    <button data-section="dashboard">Dashboard</button>
     <button data-section="config">Configuration</button>
-    <button data-section="logs">Logs</button>
+    <button data-section="network">Réseau</button>
     <button data-section="control">Contrôle</button>
-    <button id="refreshStatusBtn">Rafraîchir statut</button>
+    <button id="refreshAllBtn">Rafraîchir tout</button>
   </nav>
 
   <main>
-    <section id="contactsSection" class="active">
-      <h2>Annuaire Téléphone</h2>
-      <input id="searchContact" type="text" placeholder="Recherche..." />
-      <div id="contactsList"></div>
-      <h3>Ajouter / Modifier un contact</h3>
-      <form id="contactForm">
-        <input type="text" name="nom" placeholder="Nom" required>
-        <input type="text" name="numero" placeholder="Numéro" required>
-        <select name="type">
-          <option value="mobile">Mobile</option>
-          <option value="fixe">Fixe</option>
-        </select>
-        <button type="submit">Enregistrer</button>
-      </form>
-      <div id="contactFeedback"></div>
+    <section id="dashboardSection" class="active">
+      <h2>Statut runtime</h2>
+      <pre id="statusJson"></pre>
     </section>
 
     <section id="configSection">
       <h2>Configuration</h2>
-      <pre id="config"></pre>
-      <form id="configForm">
-        <input type="text" name="param1" placeholder="Paramètre 1">
-        <input type="text" name="param2" placeholder="Paramètre 2">
-        <button type="submit">Enregistrer</button>
-      </form>
+      <div class="inline-actions">
+        <button id="refreshConfigBtn">Rafraîchir configuration</button>
+      </div>
+      <pre id="configJson"></pre>
     </section>
 
-    <section id="logsSection">
-      <h2>Logs</h2>
-      <pre id="logs"></pre>
-      <button id="refreshLogsBtn">Rafraîchir logs</button>
+    <section id="networkSection">
+      <h2>Réseau et bridges</h2>
+      <div class="grid2">
+        <div>
+          <h3>WiFi</h3>
+          <form id="wifiConnectForm">
+            <input type="text" id="wifiSsid" placeholder="SSID" required>
+            <input type="password" id="wifiPass" placeholder="Mot de passe">
+            <button type="submit">Connecter WiFi</button>
+          </form>
+          <div class="inline-actions">
+            <button id="wifiDisconnectBtn">Déconnecter WiFi</button>
+            <button id="wifiScanBtn">Scanner WiFi</button>
+          </div>
+          <pre id="wifiJson"></pre>
+        </div>
+
+        <div>
+          <h3>MQTT</h3>
+          <div class="inline-actions">
+            <button id="mqttConnectBtn">Connecter MQTT</button>
+            <button id="mqttDisconnectBtn">Déconnecter MQTT</button>
+          </div>
+          <pre id="mqttJson"></pre>
+        </div>
+
+        <div>
+          <h3>ESP-NOW</h3>
+          <form id="espnowPeerForm">
+            <input type="text" id="espnowMac" placeholder="AA:BB:CC:DD:EE:FF" required>
+            <button type="submit">Ajouter pair</button>
+            <button type="button" id="espnowDelBtn">Supprimer pair</button>
+          </form>
+          <form id="espnowSendForm">
+            <input type="text" id="espnowTarget" placeholder="broadcast ou MAC" value="broadcast" required>
+            <textarea id="espnowPayload" rows="3" placeholder="Payload (texte ou JSON)">{\"cmd\":\"STATUS\"}</textarea>
+            <button type="submit">Envoyer</button>
+          </form>
+          <div class="inline-actions">
+            <button id="espnowOnBtn">ESPNOW_ON</button>
+            <button id="espnowOffBtn">ESPNOW_OFF</button>
+            <button id="espnowRefreshBtn">Rafraîchir ESP-NOW</button>
+          </div>
+          <pre id="espnowJson"></pre>
+          <pre id="espnowPeersJson"></pre>
+        </div>
+      </div>
     </section>
 
     <section id="controlSection">
       <h2>Contrôle</h2>
-      <button data-action="call">Déclencher sonnerie</button>
-      <button data-action="capture_start">Démarrer capture</button>
-      <button data-action="capture_stop">Arrêter capture</button>
-      <pre id="controlResult"></pre>
+      <div class="inline-actions">
+        <button data-action="CALL">CALL</button>
+        <button data-action="CAPTURE_START">CAPTURE_START</button>
+        <button data-action="CAPTURE_STOP">CAPTURE_STOP</button>
+        <button data-action="RESET_METRICS">RESET_METRICS</button>
+      </div>
+      <form id="rawCommandForm">
+        <input type="text" id="rawCommandInput" placeholder="Commande série (ex: ESPNOW_STATUS)" required>
+        <button type="submit">Exécuter</button>
+      </form>
+      <pre id="actionResult"></pre>
     </section>
   </main>
 
