@@ -6,6 +6,7 @@
   --accent-strong: #084a81;
   --ok: #19753d;
   --border: #d8dee4;
+  --warn: #9a5f00;
 }
 
 * {
@@ -61,31 +62,28 @@ section.active {
   display: block;
 }
 
-#contactsList {
+.grid2 {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
 }
 
-.contact-card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  background: #fcfdff;
-}
-
-.contact-actions {
-  margin-top: 8px;
+.inline-actions {
+  margin: 8px 0;
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 input,
-select {
+select,
+textarea {
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
 }
 
 form {
@@ -101,9 +99,18 @@ pre {
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-#contactFeedback {
-  margin-top: 8px;
-  color: var(--ok);
+@media (max-width: 760px) {
+  body {
+    padding: 12px;
+  }
+
+  button,
+  input,
+  textarea {
+    width: 100%;
+  }
 }
