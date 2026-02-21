@@ -1,0 +1,22 @@
+{
+  "schema_version": "repo_state.v1",
+  "generated_at_utc": "2026-02-21T02:23:01Z",
+  "repo": "RTC_BL_PHONE",
+  "repo_url": "https://github.com/electron-rare/RTC_BL_PHONE.git",
+  "branch": "codex/repo-state-rtc",
+  "head": "b97794c967f39a816b9d423544f96178b985f1c7",
+  "head_date": "2026-02-21T03:09:10+01:00",
+  "head_subject": "Merge pull request #20 from electron-rare/codex/rtc-zeroclaw-orchestration-issue-18",
+  "project_kind": "firmware_embedded",
+  "pivot_changes": [
+    {
+      "path": "(none)",
+      "tags": [
+        "general_change"
+      ]
+    }
+  ],
+  "impact_gates": [
+    "general_change"
+  ]
+}
