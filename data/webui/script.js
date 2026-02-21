@@ -1,155 +1,130 @@
-let contactsData = [];
+const SECTION_MAP = {
+  dashboard: "dashboardSection",
+  config: "configSection",
+  network: "networkSection",
+  control: "controlSection",
+};
 
 function showSection(section) {
-  const map = {
-    contacts: "contactsSection",
-    config: "configSection",
-    logs: "logsSection",
-    control: "controlSection",
-  };
-  Object.values(map).forEach((id) => {
+  Object.values(SECTION_MAP).forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
       el.classList.remove("active");
     }
   });
-  const sectionEl = document.getElementById(map[section]);
+  const sectionEl = document.getElementById(SECTION_MAP[section]);
   if (sectionEl) {
     sectionEl.classList.add("active");
   }
 }
 
-async function safeFetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+function setJson(id, value) {
+  const el = document.getElementById(id);
+  if (!el) {
+    return;
   }
-  return response.json();
+  if (typeof value === "string") {
+    el.textContent = value;
+    return;
+  }
+  el.textContent = JSON.stringify(value, null, 2);
+}
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const text = await response.text();
+  let parsed = {};
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch (_) {
+      parsed = { raw: text };
+    }
+  }
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${text || ""}`.trim());
+  }
+  return parsed;
+}
+
+function jsonHeaders() {
+  return { "Content-Type": "application/json" };
+}
+
+function parsePayloadValue(rawPayload) {
+  const trimmed = rawPayload.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch (_) {
+      return rawPayload;
+    }
+  }
+  return rawPayload;
 }
 
 async function refreshStatus() {
-  const status = document.getElementById("status");
+  const line = document.getElementById("statusLine");
   try {
-    const data = await safeFetchJson("/api/status");
-    status.textContent =
-      `state=${data.state} board=${data.board_profile || "n/a"} ` +
-      `telephony=${data.telephony || "n/a"} hook=${data.hook || "n/a"} ` +
-      `full_duplex=${data.full_duplex} underrun=${data.audio_underrun_count || 0} ` +
-      `drop=${data.audio_drop_frames || 0}`;
+    const status = await requestJson("/api/status");
+    const telephonyState = status.telephony?.state || "n/a";
+    const hook = status.telephony?.hook || "n/a";
+    const wifiState = status.wifi?.state || "n/a";
+    const mqttConnected = status.mqtt?.connected ? "on" : "off";
+    const peers = status.espnow?.peer_count ?? 0;
+    line.textContent =
+      `board=${status.board_profile || "n/a"} telephony=${telephonyState} hook=${hook} ` +
+      `wifi=${wifiState} mqtt=${mqttConnected} espnow_peers=${peers}`;
+    setJson("statusJson", status);
   } catch (error) {
-    status.textContent = `Erreur statut: ${error.message}`;
+    line.textContent = `Erreur statut: ${error.message}`;
+    setJson("statusJson", { error: error.message });
   }
 }
 
-async function loadContacts() {
+async function refreshConfig() {
   try {
-    contactsData = await safeFetchJson("/api/contacts");
-    renderContacts();
+    const [pins, audio, mqtt] = await Promise.all([
+      requestJson("/api/config/pins"),
+      requestJson("/api/config/audio"),
+      requestJson("/api/config/mqtt"),
+    ]);
+    setJson("configJson", { pins, audio, mqtt });
   } catch (error) {
-    document.getElementById("contactFeedback").textContent = `Erreur contacts: ${error.message}`;
+    setJson("configJson", { error: error.message });
   }
 }
 
-function renderContacts() {
-  const list = document.getElementById("contactsList");
-  const searchInput = document.getElementById("searchContact");
-  const search = (searchInput?.value || "").toLowerCase();
-  list.innerHTML = "";
-
-  contactsData
-    .filter((c) => c.nom.toLowerCase().includes(search) || c.numero.includes(search))
-    .forEach((c, idx) => {
-      const card = document.createElement("div");
-      card.className = "contact-card";
-      card.innerHTML = `<b>${c.nom}</b><br><span>${c.numero}</span><br><span>${c.type}</span>`;
-
-      const actions = document.createElement("div");
-      actions.className = "contact-actions";
-      actions.innerHTML =
-        `<button data-call="${c.numero}">Appeler</button>` +
-        `<button data-edit="${idx}">Modifier</button>` +
-        `<button data-delete="${idx}">Supprimer</button>`;
-      card.appendChild(actions);
-      list.appendChild(card);
-    });
-}
-
-function editContact(idx) {
-  const c = contactsData[idx];
-  if (!c) {
-    return;
-  }
-  const form = document.getElementById("contactForm");
-  form.nom.value = c.nom;
-  form.numero.value = c.numero;
-  form.type.value = c.type;
-  form.dataset.editIdx = String(idx);
-}
-
-async function deleteContact(idx) {
-  const response = await fetch("/api/contacts", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idx }),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  await loadContacts();
-  document.getElementById("contactFeedback").textContent = "Contact supprimé";
-}
-
-async function callContact(numero) {
-  await sendControl("call", { numero });
-  document.getElementById("contactFeedback").textContent = `Appel lancé vers ${numero}`;
-}
-
-async function loadConfig() {
+async function refreshNetwork() {
   try {
-    const data = await safeFetchJson("/api/config");
-    document.getElementById("config").textContent = JSON.stringify(data, null, 2);
+    const [wifi, mqtt, espnow, peers] = await Promise.all([
+      requestJson("/api/network/wifi"),
+      requestJson("/api/network/mqtt"),
+      requestJson("/api/network/espnow"),
+      requestJson("/api/network/espnow/peer"),
+    ]);
+    setJson("wifiJson", wifi);
+    setJson("mqttJson", mqtt);
+    setJson("espnowJson", espnow);
+    setJson("espnowPeersJson", peers);
   } catch (error) {
-    document.getElementById("config").textContent = `Erreur config: ${error.message}`;
+    const err = { error: error.message };
+    setJson("wifiJson", err);
+    setJson("mqttJson", err);
+    setJson("espnowJson", err);
+    setJson("espnowPeersJson", err);
   }
 }
 
-async function saveConfig(event) {
-  event.preventDefault();
-  const form = event.target;
-  const payload = {
-    param1: form.param1.value || "valeur1",
-    param2: form.param2.value || "valeur2",
-  };
-  const response = await fetch("/api/config", {
+async function sendControl(action) {
+  const result = await requestJson("/api/control", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    headers: jsonHeaders(),
+    body: JSON.stringify({ action }),
   });
-  if (!response.ok) {
-    document.getElementById("config").textContent = `Erreur config: HTTP ${response.status}`;
-    return;
-  }
-  await loadConfig();
-}
-
-async function refreshLogs() {
-  const response = await fetch("/api/logs");
-  const logs = response.ok ? await response.text() : `Erreur logs: HTTP ${response.status}`;
-  document.getElementById("logs").textContent = logs;
-}
-
-async function sendControl(action, extraPayload = {}) {
-  const response = await fetch("/api/control", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, ...extraPayload }),
-  });
-  const body = await response.text();
-  document.getElementById("controlResult").textContent = body;
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return true;
+  setJson("actionResult", result);
+  await Promise.all([refreshStatus(), refreshNetwork()]);
+  return result;
 }
 
 function bindEvents() {
@@ -157,58 +132,147 @@ function bindEvents() {
     button.addEventListener("click", () => showSection(button.dataset.section));
   });
 
-  document.getElementById("refreshStatusBtn").addEventListener("click", refreshStatus);
-  document.getElementById("refreshLogsBtn").addEventListener("click", refreshLogs);
-  document.getElementById("searchContact").addEventListener("input", renderContacts);
-  document.getElementById("configForm").addEventListener("submit", saveConfig);
+  document.getElementById("refreshAllBtn").addEventListener("click", async () => {
+    await Promise.all([refreshStatus(), refreshConfig(), refreshNetwork()]);
+  });
+  document.getElementById("refreshConfigBtn").addEventListener("click", refreshConfig);
+  document.getElementById("espnowRefreshBtn").addEventListener("click", refreshNetwork);
 
-  document.getElementById("contactForm").addEventListener("submit", async (event) => {
+  document.getElementById("wifiConnectForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = event.target;
-    const editIdxRaw = form.dataset.editIdx;
-    const hasEditIdx = typeof editIdxRaw !== "undefined";
-    const payload = {
-      nom: form.nom.value,
-      numero: form.numero.value,
-      type: form.type.value,
-    };
-    const method = hasEditIdx ? "PUT" : "POST";
-    const body = hasEditIdx ? { ...payload, idx: Number(editIdxRaw) } : payload;
-
-    const response = await fetch("/api/contacts", {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      document.getElementById("contactFeedback").textContent = `Erreur contact: HTTP ${response.status}`;
-      return;
+    const ssid = document.getElementById("wifiSsid").value.trim();
+    const pass = document.getElementById("wifiPass").value;
+    try {
+      const result = await requestJson("/api/network/wifi/connect", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ ssid, pass }),
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshStatus(), refreshNetwork()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
     }
-    delete form.dataset.editIdx;
-    form.reset();
-    document.getElementById("contactFeedback").textContent = hasEditIdx
-      ? "Contact modifié"
-      : "Contact ajouté";
-    await loadContacts();
   });
 
-  document.getElementById("contactsList").addEventListener("click", async (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
+  document.getElementById("wifiDisconnectBtn").addEventListener("click", async () => {
     try {
-      if (target.dataset.call) {
-        await callContact(target.dataset.call);
-      }
-      if (target.dataset.edit) {
-        editContact(Number(target.dataset.edit));
-      }
-      if (target.dataset.delete) {
-        await deleteContact(Number(target.dataset.delete));
-      }
+      const result = await requestJson("/api/network/wifi/disconnect", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshStatus(), refreshNetwork()]);
     } catch (error) {
-      document.getElementById("contactFeedback").textContent = error.message;
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("wifiScanBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/network/wifi/scan", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await refreshNetwork();
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("mqttConnectBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/network/mqtt/connect", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshStatus(), refreshNetwork()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("mqttDisconnectBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/network/mqtt/disconnect", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: "{}",
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshStatus(), refreshNetwork()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("espnowOnBtn").addEventListener("click", async () => {
+    try {
+      await sendControl("ESPNOW_ON");
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("espnowOffBtn").addEventListener("click", async () => {
+    try {
+      await sendControl("ESPNOW_OFF");
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("espnowPeerForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const mac = document.getElementById("espnowMac").value.trim();
+    try {
+      const result = await requestJson("/api/network/espnow/peer", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ mac }),
+      });
+      setJson("actionResult", result);
+      await refreshNetwork();
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("espnowDelBtn").addEventListener("click", async () => {
+    const mac = document.getElementById("espnowMac").value.trim();
+    try {
+      const result = await requestJson("/api/network/espnow/peer", {
+        method: "DELETE",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ mac }),
+      });
+      setJson("actionResult", result);
+      await refreshNetwork();
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("espnowSendForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const target = document.getElementById("espnowTarget").value.trim();
+    const payloadRaw = document.getElementById("espnowPayload").value;
+    const payload = parsePayloadValue(payloadRaw);
+    try {
+      const result = await requestJson("/api/network/espnow/send", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ mac: target, payload }),
+      });
+      setJson("actionResult", result);
+      await refreshNetwork();
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
     }
   });
 
@@ -217,14 +281,24 @@ function bindEvents() {
       try {
         await sendControl(button.dataset.action);
       } catch (error) {
-        document.getElementById("controlResult").textContent = error.message;
+        setJson("actionResult", { error: error.message });
       }
     });
+  });
+
+  document.getElementById("rawCommandForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const action = document.getElementById("rawCommandInput").value.trim();
+    try {
+      await sendControl(action);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
   });
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
-  await Promise.all([refreshStatus(), loadContacts(), loadConfig(), refreshLogs()]);
-  showSection("contacts");
+  await Promise.all([refreshStatus(), refreshConfig(), refreshNetwork()]);
+  showSection("dashboard");
 });

@@ -109,6 +109,48 @@ bool splitFirstToken(const String& input, String& first, String& rest) {
     return true;
 }
 
+bool extractBridgeCommand(JsonVariantConst payload, String& out_cmd, uint8_t depth = 0) {
+    if (depth > 4U) {
+        return false;
+    }
+
+    if (payload.is<const char*>()) {
+        out_cmd = payload.as<const char*>();
+        out_cmd.trim();
+        return !out_cmd.isEmpty();
+    }
+
+    if (!payload.is<JsonObjectConst>()) {
+        return false;
+    }
+
+    const char* keys[] = {"cmd", "raw", "command", "action"};
+    for (const char* key : keys) {
+        if (!payload[key].is<const char*>()) {
+            continue;
+        }
+        out_cmd = payload[key].as<const char*>();
+        out_cmd.trim();
+        if (!out_cmd.isEmpty()) {
+            return true;
+        }
+    }
+
+    if (!payload["event"].isNull() && extractBridgeCommand(payload["event"], out_cmd, static_cast<uint8_t>(depth + 1U))) {
+        return true;
+    }
+    if (!payload["message"].isNull() &&
+        extractBridgeCommand(payload["message"], out_cmd, static_cast<uint8_t>(depth + 1U))) {
+        return true;
+    }
+    if (!payload["payload"].isNull() &&
+        extractBridgeCommand(payload["payload"], out_cmd, static_cast<uint8_t>(depth + 1U))) {
+        return true;
+    }
+
+    return false;
+}
+
 AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig& audio_cfg) {
     AudioConfig cfg;
     cfg.port = I2S_NUM_0;
@@ -534,6 +576,14 @@ void registerCommands() {
         return makeResponse(ok, "MQTT_PUB");
     });
 
+    g_dispatcher.registerCommand("ESPNOW_ON", [](const String&) {
+        return makeResponse(g_espnow.begin(g_peer_store), "ESPNOW_ON");
+    });
+
+    g_dispatcher.registerCommand("ESPNOW_OFF", [](const String&) {
+        return makeResponse(g_espnow.stop(), "ESPNOW_OFF");
+    });
+
     g_dispatcher.registerCommand("ESPNOW_PEER_ADD", [](const String& args) {
         if (args.isEmpty()) {
             return makeResponse(false, "ESPNOW_PEER_ADD invalid_mac");
@@ -683,11 +733,8 @@ void registerCommands() {
 }
 
 void processInboundBridgeCommand(const String& source, const JsonVariantConst& payload) {
-    String cmd = payload["cmd"] | "";
-    if (cmd.isEmpty()) {
-        cmd = payload["raw"] | "";
-    }
-    if (cmd.isEmpty()) {
+    String cmd;
+    if (!extractBridgeCommand(payload, cmd)) {
         return;
     }
 
