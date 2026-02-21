@@ -2,9 +2,9 @@ name: Firmware CI
 
 on:
   push:
-    branches: [main, develop, dev, audit/**]
+    branches: [main, release/stable]
   pull_request:
-    branches: [main, develop, dev, audit/**]
+    branches: [main, release/stable]
 
 jobs:
   build-and-test:
@@ -23,7 +23,15 @@ jobs:
         run: python3 -m unittest scripts/test_check_web_route_parity.py
 
       - name: Check Web Route Parity
-        run: python3 scripts/check_web_route_parity.py
+        run: python3 scripts/check_web_route_parity.py --report-json artifacts/route_parity_report.json
+
+      - name: Upload route parity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: route-parity-report
+          path: artifacts/route_parity_report.json
+          if-no-files-found: warn
 
       - name: Install PlatformIO
         run: |
