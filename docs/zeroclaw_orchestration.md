@@ -68,3 +68,23 @@ Note technique:
 
 - Sur `esp32dev`, il faut initialiser le stack reseau avant `AsyncWebServer::begin()`
   pour eviter le crash `lwIP Invalid mbox`.
+
+## 5) Preuve boucle complète (2026-02-21)
+
+Etat courant:
+
+- `PR #20` (RTC) et `PR #22` (repo_state) sont déjà intégrées.
+- `Kill_LIFE`: PR `#11` intégrée pour le watcher 1min + realtime log.
+- `Zacus`: PR `#101` et `#103`/`#105` déjà intégrées.
+
+Run proof:
+
+- `python3 scripts/zeroclaw_hw_preflight.py --require-port --zeroclaw-bin /Users/cils/Documents/Lelectron_rare/Kill_LIFE/zeroclaw/target/release/zeroclaw` ✅
+- `pio run -e esp32dev -e esp32-s3-devkitc-1` ✅
+- `python3 scripts/hw_validation.py --port-a252 ... --port-s3 ... --bench-port ... --flash` ❌
+  - bloqué: ports sérielles non distincts / indisponibles pour l’état bench (erreurs Resource busy + commandes inconnues).
+
+Actions:
+
+- Poursuivre sur l’issue RTC dédiée: https://github.com/electron-rare/RTC_BL_PHONE/issues/23
+- Re-lancer la boucle dès que les ports A252, S3 et bench sont explicitement valables.
