@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
 
 #include "audio/AudioEngine.h"
 #include "core/PlatformProfile.h"
@@ -59,7 +60,7 @@ void printStatusLine() {
     doc["telephony"] = telephonyStateToString(g_telephony.state());
     doc["hook"] = g_slic.isHookOff() ? "OFF_HOOK" : "ON_HOOK";
     doc["full_duplex"] = g_audio.supportsFullDuplex();
-    appendAudioMetrics(doc.to<JsonObject>());
+    appendAudioMetrics(doc.as<JsonObject>());
     String payload;
     serializeJson(doc, payload);
     Serial.println(payload);
@@ -185,6 +186,18 @@ void setup() {
     g_audio.resetMetrics();
 
     g_telephony.begin(g_profile, g_slic, g_audio);
+
+    // Ensure LWIP/tcpip stack is initialized before AsyncWebServer starts.
+    if (WiFi.getMode() == WIFI_MODE_NULL) {
+        const bool mode_ok = WiFi.mode(WIFI_AP);
+        const bool ap_ok = mode_ok && WiFi.softAP("RTC_BL_PHONE");
+        if (ap_ok) {
+            Serial.printf("[RTC_BL_PHONE] AP ready: ssid=RTC_BL_PHONE ip=%s\n",
+                          WiFi.softAPIP().toString().c_str());
+        } else {
+            Serial.println("[RTC_BL_PHONE] WARN: WiFi AP init failed; web server may be unavailable");
+        }
+    }
 
     g_web.setRateLimitMs(1000);
     g_web.setAuthEnabled(false);
