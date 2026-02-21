@@ -45,3 +45,26 @@ Si credentials manquants, choisir un provider:
 3. Patch minimal RTC.
 4. Tests locaux ciblés.
 5. PR dédiée RTC avec logs/artefacts.
+
+## 4) Run local ESP32 audio dev (A252 only)
+
+Contexte bench actuel: carte `esp32dev` (audio dev), sans cible S3 connectee.
+
+Commande de reference:
+
+```bash
+cd /Users/cils/Documents/Lelectron_rare/RTC_BL_PHONE
+python3 scripts/zeroclaw_hw_preflight.py --require-port --zeroclaw-bin /Users/cils/Documents/Lelectron_rare/Kill_LIFE/zeroclaw/target/release/zeroclaw
+pio run -e esp32dev
+pio run -e esp32dev -t upload --upload-port /dev/cu.SLAB_USBtoUART
+```
+
+Smoke terminal attendu:
+
+- `PING` => `PONG`
+- `STATUS` => JSON avec `board_profile`, `telephony`, `hook`, `full_duplex`, metriques audio.
+
+Note technique:
+
+- Sur `esp32dev`, il faut initialiser le stack reseau avant `AsyncWebServer::begin()`
+  pour eviter le crash `lwIP Invalid mbox`.
