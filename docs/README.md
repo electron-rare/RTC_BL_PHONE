@@ -37,6 +37,7 @@ Chaque fiche détaille : rôle, API, notifications, points de validation, synerg
 | Tests livraison             | plan_tests_livraison.md       |
 | WebUI                       | plan_webui.md                 |
 | Spec WebUI route parity     | spec_webui_route_parity_and_coverage_v1.md |
+| État des specs              | SPECS_STATE.md |
 
 ## Procédures QA & hardware
 | Procédure                   | Fichier                       |

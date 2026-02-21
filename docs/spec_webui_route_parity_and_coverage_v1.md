@@ -66,6 +66,12 @@ Out-of-scope:
   - espnow on/off/send/peer,
   - control actions.
 
+### Preuve d’état (mise à jour)
+
+- Local (2026-02-21) : `scripts/check_web_route_parity.py` -> `backend routes: 29 | frontend routes: 29` et `parity check passed`.
+- CI : le check parity s’exécute via `.github/workflows/ci.yml` avec export (`python3 scripts/check_web_route_parity.py --report-json artifacts/route_parity_report.json`).
+- EF-02 : artefact dédié `route-parity-report` publié via `actions/upload-artifact`.
+
 ## 5. Exigences non fonctionnelles
 
 - Exécution gate parity < 3 secondes en CI standard.
@@ -86,15 +92,14 @@ Phase B (coverage UI):
 
 ## 7. Critères d'acceptation (DoD)
 
-- [ ] `scripts/check_web_route_parity.py` exécuté en CI.
-- [ ] Échec CI confirmé quand une route frontend orpheline est injectée (test négatif).
-- [ ] Les routes EF-03 sont accessibles depuis la WebUI.
-- [ ] `docs/rapport_tests_fonctionnels.md` inclut la vérification de ces routes.
+- [x] `scripts/check_web_route_parity.py` exécuté en CI.
+- [x] Échec CI confirmé quand une route frontend orpheline est injectée (test négatif).
+- [x] Les routes EF-03 sont accessibles depuis la WebUI.
+- [x] `docs/rapport_tests_fonctionnels.md` inclut la vérification de ces routes.
 - [ ] Issue `#11` mise à jour avec run CI de preuve.
 - [ ] Issue `#10` mise à jour avec captures/JSON de couverture.
 
 ## 8. Coordination inter-repos
 
-- Pattern source: `Kill_LIFE` PR #2 (route parity gate pattern).
 - Companion Zacus: issue `le-mystere-professeur-zacus#94`.
 - Contrat ESP-NOW inchangé: `cmd/raw/command/action` + `event/message/payload`.

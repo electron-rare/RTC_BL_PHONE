@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -88,6 +89,36 @@ def format_routes(routes: Iterable[Route]) -> str:
     return "\n".join(f"  - {method} {path}" for method, path in ordered)
 
 
+def routes_to_payload(routes: Iterable[Route]) -> list[dict[str, str]]:
+    ordered = sorted(routes, key=lambda route: (route[1], route[0]))
+    return [{"method": method, "path": path} for method, path in ordered]
+
+
+def build_report(
+    backend_routes: set[Route],
+    frontend_routes: set[Route],
+    missing_in_backend: set[Route],
+    unused_backend: set[Route],
+    strict_unused_backend: bool,
+    status: str,
+) -> dict[str, object]:
+    return {
+        "backend_count": len(backend_routes),
+        "frontend_count": len(frontend_routes),
+        "backend_routes": routes_to_payload(backend_routes),
+        "frontend_routes": routes_to_payload(frontend_routes),
+        "missing_in_backend": routes_to_payload(missing_in_backend),
+        "unused_backend": routes_to_payload(unused_backend),
+        "strict_unused_backend": strict_unused_backend,
+        "status": status,
+    }
+
+
+def write_report_json(path: Path, report: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def load_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")
@@ -115,6 +146,11 @@ def main() -> int:
         action="store_true",
         help="Fail if backend API routes are not used by the WebUI.",
     )
+    parser.add_argument(
+        "--report-json",
+        default="",
+        help="Optional path to write a JSON parity report.",
+    )
     args = parser.parse_args()
 
     backend_path = Path(args.backend)
@@ -127,9 +163,29 @@ def main() -> int:
 
     if not backend_routes:
         print("[route-parity] no backend /api routes detected", file=sys.stderr)
+        if args.report_json:
+            report = build_report(
+                backend_routes,
+                frontend_routes,
+                missing_in_backend=frontend_routes - backend_routes,
+                unused_backend=backend_routes - frontend_routes,
+                strict_unused_backend=args.strict_unused_backend,
+                status="fail",
+            )
+            write_report_json(Path(args.report_json), report)
         return 2
     if not frontend_routes:
         print("[route-parity] no frontend /api requestJson() calls detected", file=sys.stderr)
+        if args.report_json:
+            report = build_report(
+                backend_routes,
+                frontend_routes,
+                missing_in_backend=frontend_routes - backend_routes,
+                unused_backend=backend_routes - frontend_routes,
+                strict_unused_backend=args.strict_unused_backend,
+                status="fail",
+            )
+            write_report_json(Path(args.report_json), report)
         return 2
 
     missing_in_backend = frontend_routes - backend_routes
@@ -142,6 +198,16 @@ def main() -> int:
     if missing_in_backend:
         print("[route-parity] missing backend routes for frontend calls:", file=sys.stderr)
         print(format_routes(missing_in_backend), file=sys.stderr)
+        if args.report_json:
+            report = build_report(
+                backend_routes,
+                frontend_routes,
+                missing_in_backend,
+                unused_backend,
+                args.strict_unused_backend,
+                status="fail",
+            )
+            write_report_json(Path(args.report_json), report)
         return 1
 
     if unused_backend:
@@ -150,9 +216,30 @@ def main() -> int:
         if args.strict_unused_backend:
             print(message, file=sys.stderr)
             print(output, file=sys.stderr)
+            if args.report_json:
+                report = build_report(
+                    backend_routes,
+                    frontend_routes,
+                    missing_in_backend,
+                    unused_backend,
+                    args.strict_unused_backend,
+                    status="fail",
+                )
+                write_report_json(Path(args.report_json), report)
             return 1
         print(message)
         print(output)
+
+    if args.report_json:
+        report = build_report(
+            backend_routes,
+            frontend_routes,
+            missing_in_backend,
+            unused_backend,
+            args.strict_unused_backend,
+            status="pass",
+        )
+        write_report_json(Path(args.report_json), report)
 
     print("[route-parity] parity check passed")
     return 0
