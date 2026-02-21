@@ -12,6 +12,9 @@ mkdir -p .pio/host
 c++ -std=c++17 -Wall -Wextra -pedantic -Isrc test/host/test_dtmf_host.cpp src/telephony/DtmfDecoder.cpp -o .pio/host/test_dtmf_host
 .pio/host/test_dtmf_host
 
+echo "[test_terminal] run web route parity parser tests"
+python3 -m unittest scripts/test_check_web_route_parity.py
+
 echo "[test_terminal] check web route parity"
 python3 scripts/check_web_route_parity.py
 
