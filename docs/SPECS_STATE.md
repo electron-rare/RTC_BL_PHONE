@@ -44,3 +44,47 @@
 - Écart documentation / exécution (doD non uniformément tracée)
 - Dépendances CI sur les branches de support non conservées (si nettoyage de branches engagé)
 - Blocs matériels/firmware S3 (liens Bluetooth/HFP) pouvant masquer la visibilité produit
+
+## 6) Enchaînement Track A / Track B (Bluetooth, WiFi, WebUI, ESP-NOW)
+
+### Track A — Delivery rapide (état courant)
+
+- WiFi:
+  - endpoints Web/API présents: `/api/network/wifi`, `/connect`, `/disconnect`, `/reconnect`, `/scan`.
+  - fallback AP actif en perte STA (`state=ap_fallback`).
+- WebUI Bluetooth:
+  - endpoints étendus pour discoverable, dial/redial/answer/hangup/calls, pbap sync.
+  - affichage états BT enrichis (`call_state`, `slc_connected`, `pbap_supported`).
+- ESP-NOW:
+  - protocole v1 documenté (`docs/espnow_api_v1.md`).
+  - compat legacy conservée (`cmd/raw/command/action`).
+- Bluetooth HFP:
+  - commandes d'appel opérationnelles.
+  - PBAP toujours `unsupported` sur stack actuelle (comportement explicitement tracé).
+
+### Track B — Migration BT/PBAP (préparation)
+
+- Faisabilité documentée: `docs/bt_pbap_migration_feasibility.md`
+- Build migration préparé: `env:esp32dev-bt-migrate`
+- Interface d'abstraction ajoutée: `src/bluetooth/IBluetoothBackend.h`
+
+### Gates de validation
+
+- Gate local minimal:
+  - `platformio run -e esp32dev`
+  - `bash scripts/test_terminal.sh`
+  - `scripts/hw_validation.py --port-a252 /dev/cu.usbserial-0001`
+- Gate CI:
+  - workflows `Repo State` + `Firmware CI` verts sur `main`
+
+## 7) Exécution hardware locale (2026-02-21, ESP32 Audio Kit)
+
+- Cible testée: `/dev/cu.usbserial-0001`
+- Upload firmware: `platformio run -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> `PASS`
+- Gate local: `bash scripts/test_terminal.sh` -> `PASS` (build unit test, host dtmf, parity parser, parity routes)
+- Smoke HW: `python3 scripts/hw_validation.py --port-a252 /dev/cu.usbserial-0001 --report-json artifacts/hw_validation_report.json --report-md artifacts/hw_validation_report.md` -> `PASS`
+- Snapshot runtime: `artifacts/runtime_snapshot.json` (inclut `BT_STATUS`, `WIFI_STATUS`, `ESPNOW_STATUS`, `/api/status`)
+- WiFi stability: `artifacts/wifi_stability_report.json` -> `PASS` (disconnect => `ap_fallback`, reconnect => `connected`, credentials persistées)
+- HFP opérable (stack actuelle): `artifacts/hfp_operational_report.json` -> `PASS` (discoverable on/off ok, `BT_DIAL` sans SLC en erreur contrôlée, `BT_PBAP_SYNC unsupported` explicite)
+- ESP-NOW protocole v1: `artifacts/espnow_protocol_v1_report.json` -> `FAIL` en bench 1 carte (pas de peer radio actif, `ESPNOW_SEND` retourne `ERR`)
+- Décision de gate: WiFi/WebUI/Bluetooth HFP command-level `GO`; ESP-NOW E2E v1 two-board `BLOCKED` jusqu’à disponibilité d’une 2e carte

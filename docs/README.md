@@ -38,6 +38,8 @@ Chaque fiche détaille : rôle, API, notifications, points de validation, synerg
 | WebUI                       | plan_webui.md                 |
 | Spec WebUI route parity     | spec_webui_route_parity_and_coverage_v1.md |
 | Spec BT HFP/PBAP dial       | spec_bt_hfp_pbap_dialing_v1.md |
+| API ESP-NOW v1              | espnow_api_v1.md              |
+| Faisabilité migration PBAP  | bt_pbap_migration_feasibility.md |
 | État des specs              | SPECS_STATE.md |
 
 ## Procédures QA & hardware

@@ -244,6 +244,33 @@ void WebServerManager::registerRoutes() {
     });
     server_.on("/api/bluetooth/hfp/disconnect", HTTP_POST,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_HFP_DISCONNECT"); });
+    server_.on("/api/bluetooth/discoverable/on", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_DISCOVERABLE_ON"); });
+    server_.on("/api/bluetooth/discoverable/off", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_DISCOVERABLE_OFF"); });
+    server_.on("/api/bluetooth/hfp/dial", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        JsonDocument doc;
+        if (!extractJsonBody(request, doc)) {
+            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
+            return;
+        }
+        const String number = doc["number"] | "";
+        if (!isValidInput(number, 32)) {
+            request->send(400, "application/json", "{\"error\":\"invalid number\"}");
+            return;
+        }
+        handleDispatch(request, "BT_DIAL " + number);
+    });
+    server_.on("/api/bluetooth/hfp/redial", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_REDIAL"); });
+    server_.on("/api/bluetooth/hfp/answer", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_ANSWER"); });
+    server_.on("/api/bluetooth/hfp/hangup", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_HANGUP"); });
+    server_.on("/api/bluetooth/hfp/calls", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_CALLS"); });
+    server_.on("/api/bluetooth/pbap/sync", HTTP_POST,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_PBAP_SYNC"); });
     server_.on("/api/bluetooth/ble/start", HTTP_POST,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_BLE_START"); });
     server_.on("/api/bluetooth/ble/stop", HTTP_POST,

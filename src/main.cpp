@@ -151,6 +151,55 @@ bool extractBridgeCommand(JsonVariantConst payload, String& out_cmd, uint8_t dep
     return false;
 }
 
+bool buildRtcBlV1BridgeCommand(JsonVariantConst payload,
+                               String& out_cmd,
+                               String& out_request_id,
+                               bool& out_is_v1) {
+    out_is_v1 = false;
+    if (!payload.is<JsonObjectConst>()) {
+        return false;
+    }
+
+    JsonObjectConst obj = payload.as<JsonObjectConst>();
+    const String proto = obj["proto"] | "";
+    if (!proto.equalsIgnoreCase("rtcbl/1")) {
+        return false;
+    }
+
+    const String cmd = obj["cmd"] | "";
+    if (cmd.isEmpty()) {
+        return false;
+    }
+
+    out_cmd = cmd;
+    out_cmd.trim();
+    if (out_cmd.isEmpty()) {
+        return false;
+    }
+
+    out_request_id = obj["id"] | "";
+    out_is_v1 = true;
+
+    if (obj["args"].isNull()) {
+        return true;
+    }
+
+    String args;
+    serializeJson(obj["args"], args);
+    args.trim();
+    if (!args.isEmpty() && args != "null") {
+        out_cmd += " ";
+        out_cmd += args;
+    }
+
+    return true;
+}
+
+bool isMacAddressString(const String& value) {
+    uint8_t mac[6] = {0};
+    return A252ConfigStore::parseMac(value, mac);
+}
+
 AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig& audio_cfg) {
     AudioConfig cfg;
     cfg.port = I2S_NUM_0;
@@ -780,7 +829,10 @@ void registerCommands() {
 
 void processInboundBridgeCommand(const String& source, const JsonVariantConst& payload) {
     String cmd;
-    if (!extractBridgeCommand(payload, cmd)) {
+    String request_id;
+    bool is_rtcbl_v1 = false;
+    if (!buildRtcBlV1BridgeCommand(payload, cmd, request_id, is_rtcbl_v1) &&
+        !extractBridgeCommand(payload, cmd)) {
         return;
     }
 
@@ -794,6 +846,33 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
     String payload_json;
     serializeJson(event, payload_json);
     g_mqtt.publish("event", payload_json, false);
+
+    if (!is_rtcbl_v1 || !isMacAddressString(source)) {
+        return;
+    }
+
+    JsonDocument response;
+    response["proto"] = "rtcbl/1";
+    response["id"] = request_id;
+    response["ok"] = result.ok;
+    response["code"] = result.code;
+    response["error"] = result.ok ? "" : (result.code.isEmpty() ? result.raw : result.code);
+
+    if (!result.json.isEmpty()) {
+        JsonDocument parsed;
+        if (deserializeJson(parsed, result.json) == DeserializationError::Ok) {
+            JsonVariant data = response["data"];
+            data.set(parsed.as<JsonVariantConst>());
+        } else {
+            response["data_raw"] = result.json;
+        }
+    } else if (!result.raw.isEmpty()) {
+        response["data_raw"] = result.raw;
+    }
+
+    String response_payload;
+    serializeJson(response, response_payload);
+    g_espnow.sendJson(source, response_payload);
 }
 
 void printHelp() {
