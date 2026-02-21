@@ -1,4 +1,4 @@
-# ESP-NOW API v1 (`rtcbl/1`)
+# ESP-NOW API v1 (enveloppe `msg_id/seq/type/payload/ack`)
 
 Date: 2026-02-21  
 Scope: contrat d'échange entre `RTC_BL_PHONE` (A252) et la seconde carte.
@@ -10,44 +10,51 @@ Normaliser les trames ESP-NOW pour:
 - conserver compatibilité legacy,
 - simplifier l'intégration du second repo.
 
-## 2. Requête v1
+## 2. Requête v1 (nouveau format recommandé)
 
 ```json
 {
-  "proto": "rtcbl/1",
-  "id": "req-001",
-  "ts": 1730000000,
-  "source": "a252",
-  "target": "peer|broadcast",
-  "cmd": "STATUS|CALL|WIFI_STATUS|BT_STATUS|...",
-  "args": {}
+  "msg_id": "req-001",
+  "seq": 1,
+  "type": "command",
+  "ack": true,
+  "payload": {
+    "cmd": "STATUS",
+    "args": {}
+  }
 }
 ```
 
 Règles:
-- `proto` obligatoire pour activer le mode v1.
-- `id` recommandé (corrélation réponse).
-- `cmd` obligatoire.
-- `args` optionnel. S'il est présent, il est sérialisé et transmis au dispatcher.
+- `msg_id` sert à corréler la réponse.
+- `seq` est un compteur local de trame (recommandé monotone par source).
+- `type=command` déclenche l'exécution côté firmware.
+- `ack=true` demande une réponse corrélée.
+- `payload.cmd` obligatoire pour une commande dispatcher.
+- `payload.args` optionnel; sérialisé puis passé au dispatcher.
 
-## 3. Réponse v1
+## 3. Réponse v1 (ack corrélée)
 
 ```json
 {
-  "proto": "rtcbl/1",
-  "id": "req-001",
-  "ok": true,
-  "code": "STATUS",
-  "data": {},
-  "error": ""
+  "msg_id": "req-001",
+  "seq": 1,
+  "type": "ack",
+  "ack": true,
+  "payload": {
+    "ok": true,
+    "code": "STATUS",
+    "data": {},
+    "error": ""
+  }
 }
 ```
 
 Règles:
-- `id` reprend la requête.
-- `ok=false` => `error` non vide.
-- `data` contient le JSON de la commande si disponible.
-- fallback possible `data_raw` si la réponse n'est pas JSON.
+- `msg_id` et `seq` reprennent la requête.
+- `payload.ok=false` => `payload.error` non vide.
+- `payload.data` contient le JSON de la commande si disponible.
+- fallback possible `payload.data_raw` si la réponse n'est pas JSON.
 
 ## 4. Compatibilité legacy
 
@@ -57,11 +64,17 @@ Le firmware continue d'accepter les formats existants:
 - `{"command":"..."}`
 - `{"action":"..."}`
 - variantes imbriquées via `event`, `message`, `payload`
+- format historique `rtcbl/1`:
+  - `{"proto":"rtcbl/1","id":"...","cmd":"...","args":{}}`
 
 ## 5. Commandes recommandées v1
 
 - `STATUS`
+- `RING`
 - `CALL`
+- `HOOK`
+- `LIST_FILES`
+- `PLAY_FILE`
 - `WIFI_STATUS`
 - `MQTT_STATUS`
 - `ESPNOW_STATUS`
@@ -70,7 +83,7 @@ Le firmware continue d'accepter les formats existants:
 ## 6. Intégration second repo
 
 Checklist minimum côté seconde carte:
-1. Émettre `proto=rtcbl/1` + `id` unique par requête.
-2. Implémenter timeout de réponse (2-5s).
-3. Corréler sur `id`.
-4. Prévoir fallback legacy si `proto` absent en réponse.
+1. Émettre `msg_id` unique + `seq` monotone.
+2. Positionner `type=command` et `ack=true` pour obtenir une réponse.
+3. Implémenter timeout de réponse (2-5s) et corréler sur `msg_id`.
+4. Prévoir fallback legacy (`rtcbl/1` + formats `cmd/raw/command/action`) pour compat.

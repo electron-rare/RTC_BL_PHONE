@@ -25,7 +25,11 @@ public:
 
 private:
     AsyncWebServer server_;
+    AsyncEventSource events_;
     uint32_t rate_limit_ms_;
+    uint32_t last_status_push_ms_;
+    String status_cache_json_;
+    bool status_cache_ready_;
     bool auth_enabled_;
     String auth_user_;
     String auth_pass_;
@@ -37,6 +41,11 @@ private:
     static bool extractJsonBody(AsyncWebServerRequest* request, JsonDocument& doc);
     static String toJsonString(const JsonDocument& doc);
     static bool isValidInput(const String& value, size_t max_len);
+    static bool isEffectCommand(const String& command_line);
+    void refreshStatusCache();
+    void publishRealtimeEvent(const char* event_name, const String& payload_json);
+    void publishRealtimeStatus();
+    void publishDispatchEvent(const String& command_line, const DispatchResponse& res);
     void handleDispatch(AsyncWebServerRequest* request,
                         const String& command_line,
                         uint16_t success_code = 200,

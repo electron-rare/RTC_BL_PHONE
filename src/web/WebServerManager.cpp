@@ -14,7 +14,15 @@ String quoteArg(const String& value) {
 }
 
 WebServerManager::WebServerManager(uint16_t port)
-    : server_(port), rate_limit_ms_(250), auth_enabled_(false), auth_user_("admin"), auth_pass_("admin") {}
+    : server_(port),
+      events_("/api/events"),
+      rate_limit_ms_(250),
+      last_status_push_ms_(0),
+      status_cache_json_(""),
+      status_cache_ready_(false),
+      auth_enabled_(false),
+      auth_user_("admin"),
+      auth_pass_("admin") {}
 
 void WebServerManager::begin() {
     if (!SPIFFS.begin(true)) {
@@ -29,7 +37,11 @@ void WebServerManager::begin() {
 }
 
 void WebServerManager::handle() {
-    // ESPAsyncWebServer is event-driven.
+    const uint32_t now = millis();
+    if (now - last_status_push_ms_ >= 1000U) {
+        last_status_push_ms_ = now;
+        refreshStatusCache();
+    }
 }
 
 void WebServerManager::setAuthCredentials(const String& user, const String& pass, bool persist_to_nvs) {
@@ -66,13 +78,29 @@ void WebServerManager::setCommandExecutor(std::function<DispatchResponse(const S
 }
 
 void WebServerManager::registerRoutes() {
-    server_.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        doc["auth_enabled"] = isAuthEnabled();
-        if (status_callback_) {
-            status_callback_(doc.to<JsonObject>());
+    events_.onConnect([this](AsyncEventSourceClient* client) {
+        JsonDocument hello;
+        hello["transport"] = "sse";
+        hello["connected"] = true;
+        hello["ts"] = millis();
+        const String payload = toJsonString(hello);
+        client->send(payload.c_str(), "hello", millis());
+        if (status_cache_ready_) {
+            client->send(status_cache_json_.c_str(), "status", millis());
         }
-        request->send(200, "application/json", toJsonString(doc));
+    });
+    server_.addHandler(&events_);
+
+    server_.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        if (status_cache_ready_) {
+            request->send(200, "application/json", status_cache_json_);
+            return;
+        }
+
+        JsonDocument warmup;
+        warmup["auth_enabled"] = isAuthEnabled();
+        warmup["state"] = "status_warmup";
+        request->send(200, "application/json", toJsonString(warmup));
     });
 
     server_.on("/api/control", HTTP_POST, [this](AsyncWebServerRequest* request) {
@@ -218,10 +246,27 @@ void WebServerManager::registerRoutes() {
         }
         const String mac = doc["mac"] | "broadcast";
         String payload;
-        if (doc["payload"].is<JsonVariant>()) {
-            serializeJson(doc["payload"], payload);
+        JsonVariantConst payload_variant = doc["payload"].as<JsonVariantConst>();
+        bool already_enveloped = false;
+        if (payload_variant.is<JsonObjectConst>()) {
+            JsonObjectConst payload_obj = payload_variant.as<JsonObjectConst>();
+            already_enveloped = payload_obj["msg_id"].is<const char*>() && payload_obj["type"].is<const char*>();
+        }
+
+        if (already_enveloped) {
+            serializeJson(payload_variant, payload);
         } else {
-            payload = doc["payload"] | "{}";
+            JsonDocument envelope;
+            envelope["msg_id"] = String("web-") + String(millis());
+            envelope["seq"] = millis();
+            envelope["type"] = "command";
+            envelope["ack"] = true;
+            if (!payload_variant.isNull()) {
+                envelope["payload"].set(payload_variant);
+            } else {
+                envelope["payload"].to<JsonObject>();
+            }
+            serializeJson(envelope, payload);
         }
         handleDispatch(request, "ESPNOW_SEND " + mac + " " + payload);
     });
@@ -315,6 +360,71 @@ bool WebServerManager::isValidInput(const String& value, size_t max_len) {
     return true;
 }
 
+bool WebServerManager::isEffectCommand(const String& command_line) {
+    String token = command_line;
+    const int sep = token.indexOf(' ');
+    if (sep > 0) {
+        token = token.substring(0, sep);
+    }
+    token.trim();
+    token.toUpperCase();
+
+    return token == "CALL" || token == "PLAY" || token == "CAPTURE_START" || token == "CAPTURE_STOP" ||
+           token == "BT_DIAL" || token == "DIAL" || token == "BT_REDIAL" || token == "BT_ANSWER" ||
+           token == "BT_HANGUP";
+}
+
+void WebServerManager::refreshStatusCache() {
+    if (!status_callback_) {
+        status_cache_ready_ = false;
+        status_cache_json_ = "";
+        return;
+    }
+
+    JsonDocument doc;
+    doc["auth_enabled"] = isAuthEnabled();
+    status_callback_(doc.to<JsonObject>());
+    status_cache_json_ = toJsonString(doc);
+    status_cache_ready_ = true;
+}
+
+void WebServerManager::publishRealtimeEvent(const char* event_name, const String& payload_json) {
+    events_.send(payload_json.c_str(), event_name, millis());
+}
+
+void WebServerManager::publishRealtimeStatus() {
+    if (!status_cache_ready_) {
+        return;
+    }
+    publishRealtimeEvent("status", status_cache_json_);
+}
+
+void WebServerManager::publishDispatchEvent(const String& command_line, const DispatchResponse& res) {
+    JsonDocument doc;
+    doc["command"] = command_line;
+    doc["ok"] = res.ok;
+    if (!res.code.isEmpty()) {
+        doc["code"] = res.code;
+    }
+    if (!res.raw.isEmpty()) {
+        doc["raw"] = res.raw;
+    }
+    if (!res.json.isEmpty()) {
+        JsonDocument parsed;
+        if (deserializeJson(parsed, res.json) == DeserializationError::Ok) {
+            doc["json"].set(parsed.as<JsonVariantConst>());
+        } else {
+            doc["json_raw"] = res.json;
+        }
+    }
+
+    const String payload = toJsonString(doc);
+    publishRealtimeEvent("dispatch", payload);
+    if (isEffectCommand(command_line)) {
+        publishRealtimeEvent("effect", payload);
+    }
+}
+
 void WebServerManager::handleDispatch(AsyncWebServerRequest* request,
                                       const String& command_line,
                                       uint16_t success_code,
@@ -331,16 +441,17 @@ void WebServerManager::handleDispatch(AsyncWebServerRequest* request,
 
     if (!res.json.isEmpty()) {
         request->send(res.ok ? success_code : error_code, "application/json", res.json);
-        return;
+    } else {
+        JsonDocument doc;
+        doc["ok"] = res.ok;
+        if (!res.code.isEmpty()) {
+            doc["code"] = res.code;
+        }
+        if (!res.raw.isEmpty()) {
+            doc["raw"] = res.raw;
+        }
+        request->send(res.ok ? success_code : error_code, "application/json", toJsonString(doc));
     }
 
-    JsonDocument doc;
-    doc["ok"] = res.ok;
-    if (!res.code.isEmpty()) {
-        doc["code"] = res.code;
-    }
-    if (!res.raw.isEmpty()) {
-        doc["raw"] = res.raw;
-    }
-    request->send(res.ok ? success_code : error_code, "application/json", toJsonString(doc));
+    publishDispatchEvent(command_line, res);
 }

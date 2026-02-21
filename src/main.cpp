@@ -151,6 +151,72 @@ bool extractBridgeCommand(JsonVariantConst payload, String& out_cmd, uint8_t dep
     return false;
 }
 
+bool buildEspNowEnvelopeCommand(JsonVariantConst payload,
+                                String& out_cmd,
+                                String& out_msg_id,
+                                uint32_t& out_seq,
+                                bool& out_ack_requested) {
+    out_cmd = "";
+    out_msg_id = "";
+    out_seq = 0;
+    out_ack_requested = true;
+
+    if (!payload.is<JsonObjectConst>()) {
+        return false;
+    }
+
+    JsonObjectConst obj = payload.as<JsonObjectConst>();
+    if (!obj["type"].is<const char*>()) {
+        return false;
+    }
+
+    String type = obj["type"] | "";
+    type.toLowerCase();
+    if (type != "command" && type != "request" && type != "cmd") {
+        return false;
+    }
+
+    out_msg_id = obj["msg_id"] | "";
+    out_seq = obj["seq"] | 0;
+    out_ack_requested = obj["ack"] | true;
+
+    JsonVariantConst body = obj["payload"];
+    if (body.isNull()) {
+        return false;
+    }
+
+    if (body.is<const char*>()) {
+        out_cmd = body.as<const char*>();
+        out_cmd.trim();
+        return !out_cmd.isEmpty();
+    }
+
+    if (body.is<JsonObjectConst>()) {
+        JsonObjectConst body_obj = body.as<JsonObjectConst>();
+        const String cmd = body_obj["cmd"] | "";
+        if (!cmd.isEmpty()) {
+            out_cmd = cmd;
+            out_cmd.trim();
+            if (out_cmd.isEmpty()) {
+                return false;
+            }
+
+            if (!body_obj["args"].isNull()) {
+                String args;
+                serializeJson(body_obj["args"], args);
+                args.trim();
+                if (!args.isEmpty() && args != "null") {
+                    out_cmd += " ";
+                    out_cmd += args;
+                }
+            }
+            return true;
+        }
+    }
+
+    return extractBridgeCommand(body, out_cmd);
+}
+
 bool buildRtcBlV1BridgeCommand(JsonVariantConst payload,
                                String& out_cmd,
                                String& out_request_id,
@@ -830,9 +896,15 @@ void registerCommands() {
 void processInboundBridgeCommand(const String& source, const JsonVariantConst& payload) {
     String cmd;
     String request_id;
+    uint32_t request_seq = 0;
+    bool request_ack = true;
+    bool is_envelope_v2 = false;
     bool is_rtcbl_v1 = false;
-    if (!buildRtcBlV1BridgeCommand(payload, cmd, request_id, is_rtcbl_v1) &&
-        !extractBridgeCommand(payload, cmd)) {
+
+    if (buildEspNowEnvelopeCommand(payload, cmd, request_id, request_seq, request_ack)) {
+        is_envelope_v2 = true;
+    } else if (!buildRtcBlV1BridgeCommand(payload, cmd, request_id, is_rtcbl_v1) &&
+               !extractBridgeCommand(payload, cmd)) {
         return;
     }
 
@@ -846,6 +918,35 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
     String payload_json;
     serializeJson(event, payload_json);
     g_mqtt.publish("event", payload_json, false);
+
+    if (is_envelope_v2 && request_ack && isMacAddressString(source)) {
+        JsonDocument response;
+        response["msg_id"] = request_id.isEmpty() ? String(millis()) : request_id;
+        response["seq"] = request_seq;
+        response["type"] = "ack";
+        response["ack"] = true;
+
+        JsonObject ack_payload = response["payload"].to<JsonObject>();
+        ack_payload["ok"] = result.ok;
+        ack_payload["code"] = result.code;
+        ack_payload["error"] = result.ok ? "" : (result.code.isEmpty() ? result.raw : result.code);
+
+        if (!result.json.isEmpty()) {
+            JsonDocument parsed;
+            if (deserializeJson(parsed, result.json) == DeserializationError::Ok) {
+                ack_payload["data"].set(parsed.as<JsonVariantConst>());
+            } else {
+                ack_payload["data_raw"] = result.json;
+            }
+        } else if (!result.raw.isEmpty()) {
+            ack_payload["data_raw"] = result.raw;
+        }
+
+        String response_payload;
+        serializeJson(response, response_payload);
+        g_espnow.sendJson(source, response_payload);
+        return;
+    }
 
     if (!is_rtcbl_v1 || !isMacAddressString(source)) {
         return;
@@ -983,6 +1084,7 @@ void loop() {
     g_wifi.loop();
     g_mqtt.tick();
     g_espnow.tick();
+    g_web.handle();
     pollSerial();
     delay(10);
 }

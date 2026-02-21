@@ -4,6 +4,8 @@ const SECTION_MAP = {
   network: "networkSection",
   control: "controlSection",
 };
+let realtimeSource = null;
+let realtimeConnected = false;
 
 function showSection(section) {
   Object.values(SECTION_MAP).forEach((id) => {
@@ -71,24 +73,101 @@ function parsePayloadValue(rawPayload) {
   return rawPayload;
 }
 
-async function refreshStatus() {
+function parseRealtimeData(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    return { raw };
+  }
+}
+
+function applyStatusSnapshot(status) {
   const line = document.getElementById("statusLine");
+  const telephonyState = status.telephony?.state || "n/a";
+  const hook = status.telephony?.hook || "n/a";
+  const wifiState = status.wifi?.state || "n/a";
+  const mqttConnected = status.mqtt?.connected ? "on" : "off";
+  const peers = status.espnow?.peer_count ?? 0;
+  const btCallState = status.bluetooth?.call_state || "n/a";
+  const btConnected = status.bluetooth?.connected ? "on" : "off";
+  const pbapSupported = status.bluetooth?.pbap_supported ? "yes" : "no";
+  const liveState = realtimeConnected ? "live=on" : "live=off";
+  line.textContent =
+    `board=${status.board_profile || "n/a"} telephony=${telephonyState} hook=${hook} ` +
+    `wifi=${wifiState} mqtt=${mqttConnected} espnow_peers=${peers} bt=${btConnected} bt_call=${btCallState} pbap=${pbapSupported} ${liveState}`;
+
+  setJson("statusJson", status);
+  if (status.wifi) {
+    setJson("wifiJson", status.wifi);
+  }
+  if (status.mqtt) {
+    setJson("mqttJson", status.mqtt);
+  }
+  if (status.espnow) {
+    setJson("espnowJson", status.espnow);
+    setJson("espnowPeersJson", { peers: status.espnow.peers || [] });
+  }
+  if (status.bluetooth) {
+    setJson("btJson", status.bluetooth);
+  }
+}
+
+function connectRealtime() {
+  if (!window.EventSource) {
+    return;
+  }
+  if (realtimeSource) {
+    realtimeSource.close();
+  }
+
+  realtimeSource = new EventSource("/api/events");
+
+  realtimeSource.addEventListener("hello", () => {
+    realtimeConnected = true;
+  });
+
+  realtimeSource.addEventListener("status", (event) => {
+    realtimeConnected = true;
+    const status = parseRealtimeData(event.data);
+    applyStatusSnapshot(status);
+  });
+
+  realtimeSource.addEventListener("dispatch", (event) => {
+    const payload = parseRealtimeData(event.data);
+    const out = { stream: "dispatch" };
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      Object.assign(out, payload);
+    } else {
+      out.payload = payload;
+    }
+    setJson("actionResult", out);
+  });
+
+  realtimeSource.addEventListener("effect", (event) => {
+    const payload = parseRealtimeData(event.data);
+    const out = { stream: "effect" };
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      Object.assign(out, payload);
+    } else {
+      out.payload = payload;
+    }
+    setJson("actionResult", out);
+  });
+
+  realtimeSource.onerror = () => {
+    realtimeConnected = false;
+  };
+}
+
+async function refreshStatus() {
   try {
     const status = await requestJson("/api/status");
-    const telephonyState = status.telephony?.state || "n/a";
-    const hook = status.telephony?.hook || "n/a";
-    const wifiState = status.wifi?.state || "n/a";
-    const mqttConnected = status.mqtt?.connected ? "on" : "off";
-    const peers = status.espnow?.peer_count ?? 0;
-    const btCallState = status.bluetooth?.call_state || "n/a";
-    const btConnected = status.bluetooth?.connected ? "on" : "off";
-    const pbapSupported = status.bluetooth?.pbap_supported ? "yes" : "no";
-    line.textContent =
-      `board=${status.board_profile || "n/a"} telephony=${telephonyState} hook=${hook} ` +
-      `wifi=${wifiState} mqtt=${mqttConnected} espnow_peers=${peers} bt=${btConnected} bt_call=${btCallState} pbap=${pbapSupported}`;
-    setJson("statusJson", status);
+    applyStatusSnapshot(status);
   } catch (error) {
+    const line = document.getElementById("statusLine");
+    const liveState = realtimeConnected ? "live=on" : "live=off";
     line.textContent = `Erreur statut: ${error.message}`;
+    line.textContent += ` ${liveState}`;
     setJson("statusJson", { error: error.message });
   }
 }
@@ -592,6 +671,7 @@ function bindEvents() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
+  connectRealtime();
   await Promise.all([refreshStatus(), refreshConfig(), refreshNetwork(), refreshBluetooth()]);
   showSection("dashboard");
 });
