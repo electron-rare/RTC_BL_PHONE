@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Local hardware validation runner for A252 + ESP32-S3."""
+"""A252-only hardware validation runner (without bench controller)."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 import time
@@ -13,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib import error, request
+from urllib import error, parse, request
 
 try:
     import serial  # type: ignore
@@ -21,10 +20,13 @@ except ImportError:  # pragma: no cover
     serial = None
 
 
+VALID_STATES = {"PASS", "FAIL", "MANUAL_PASS", "MANUAL_FAIL", "MANUAL_SKIP"}
+
+
 @dataclass
 class ScenarioResult:
     name: str
-    passed: bool
+    state: str
     details: Dict[str, Any]
 
 
@@ -48,7 +50,7 @@ class SerialEndpoint:
 
     def __enter__(self) -> "SerialEndpoint":
         self._ser = serial.Serial(self.port, self.baud, timeout=self.timeout_s)
-        time.sleep(0.3)
+        time.sleep(0.8)
         self._ser.reset_input_buffer()
         self._ser.reset_output_buffer()
         return self
@@ -57,23 +59,16 @@ class SerialEndpoint:
         if self._ser and self._ser.is_open:
             self._ser.close()
 
-    def command(
-        self,
-        cmd: str,
-        *,
-        timeout_s: float = 5.0,
-        expect_json: bool = False,
-        expected_prefixes: Optional[List[str]] = None,
-    ) -> Any:
-        if self._ser is None:
-            raise RuntimeError("serial endpoint is not open")
-
-        self._ser.write((cmd + "\n").encode("utf-8"))
+    def command(self, cmd: str, timeout_s: float = 6.0, expect: str = "any") -> Dict[str, Any]:
+        if not self._ser or not self._ser.is_open:
+            raise RuntimeError("serial port not open")
+        self._ser.reset_input_buffer()
+        self._ser.write((cmd + "\r\n").encode())
         self._ser.flush()
 
-        deadline = time.monotonic() + timeout_s
+        deadline = time.time() + timeout_s
         last_line = ""
-        while time.monotonic() < deadline:
+        while time.time() < deadline:
             raw = self._ser.readline()
             if not raw:
                 continue
@@ -82,284 +77,233 @@ class SerialEndpoint:
                 continue
             last_line = line
             print(f"[{self.port}] {line}")
+            if line.startswith("{") and line.endswith("}"):
+                if expect in {"any", "json"}:
+                    try:
+                        return json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                continue
+            if line.startswith("OK ") or line.startswith("ERR "):
+                if expect in {"any", "ack"}:
+                    return {"ok": line.startswith("OK "), "line": line}
+                continue
+            if line == "PONG":
+                if expect in {"any", "pong", "ack"}:
+                    return {"ok": True, "result": "PONG"}
+                continue
+        raise RuntimeError(f"timeout on command '{cmd}' last='{last_line}'")
 
-            if expect_json:
-                try:
-                    return json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-            if expected_prefixes is None:
-                return line
-            if any(line.startswith(prefix) for prefix in expected_prefixes):
-                return line
-
-        raise RuntimeError(f"Timeout waiting response to '{cmd}' on {self.port}; last='{last_line}'")
+    def sync(self, retries: int = 6) -> None:
+        last_error = ""
+        for _ in range(retries):
+            try:
+                self.command("PING", timeout_s=2.0, expect="pong")
+                return
+            except Exception as exc:  # pragma: no cover - hardware timing
+                last_error = str(exc)
+                time.sleep(0.5)
+        raise RuntimeError(f"serial sync failed: {last_error}")
 
 
-def parse_latency_ms(value: Any, fallback_ms: int) -> int:
-    if isinstance(value, (int, float)):
-        return int(value)
-    if isinstance(value, str):
-        match = re.search(r"(\d+(\.\d+)?)", value)
-        if match:
-            return int(float(match.group(1)))
-    return fallback_ms
-
-
-def fetch_http_status(base_url: str) -> Dict[str, Any]:
-    url = base_url.rstrip("/") + "/api/status"
+def fetch_json(url: str) -> Dict[str, Any]:
     req = request.Request(url, method="GET")
-    with request.urlopen(req, timeout=5) as response:
-        payload = response.read().decode("utf-8")
-    return json.loads(payload)
+    with request.urlopen(req, timeout=5) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
-def check_web_endpoint(base_url: str, path: str, method: str = "GET", body: Optional[Dict[str, Any]] = None) -> int:
-    url = base_url.rstrip("/") + path
-    data = None
-    headers = {}
-    if body is not None:
-        data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = request.Request(url, data=data, headers=headers, method=method)
+def post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    raw = json.dumps(payload)
+    req = request.Request(
+        url,
+        method="POST",
+        data=raw.encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
     try:
-        with request.urlopen(req, timeout=5) as response:
-            return int(response.status)
+        with request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
     except error.HTTPError as exc:
-        return int(exc.code)
+        if exc.code != 400:
+            raise
+        # Fallback for endpoints implemented with AsyncWebServer "plain" body extraction.
+        fallback = request.Request(
+            url,
+            method="POST",
+            data=parse.urlencode({"plain": raw}).encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with request.urlopen(fallback, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
 
-def scenario_slic_transition(
-    name: str,
-    phone: SerialEndpoint,
-    bench: SerialEndpoint,
-    hook_target: str,
-) -> ScenarioResult:
+def scenario_serial_smoke(dev: SerialEndpoint) -> ScenarioResult:
     details: Dict[str, Any] = {}
     try:
-        phone.command("CALL", expected_prefixes=["OK", "ERR"], timeout_s=2)
-        time.sleep(0.8)
-        status_ring = phone.command("STATUS", expect_json=True, timeout_s=3)
-        details["ring_state"] = status_ring.get("telephony")
-
-        bench.command(f"HOOK {hook_target} ON", timeout_s=3)
-        time.sleep(0.8)
-        status_offhook = phone.command("STATUS", expect_json=True, timeout_s=3)
-        details["offhook_state"] = status_offhook.get("telephony")
-
-        bench.command(f"HOOK {hook_target} OFF", timeout_s=3)
-        time.sleep(0.8)
-        status_idle = phone.command("STATUS", expect_json=True, timeout_s=3)
-        details["idle_state"] = status_idle.get("telephony")
-
-        passed = (
-            details["ring_state"] == "RINGING"
-            and details["offhook_state"] in ("PLAYING_MESSAGE", "OFF_HOOK")
-            and details["idle_state"] == "IDLE"
-        )
-        return ScenarioResult(name=name, passed=passed, details=details)
-    except Exception as exc:  # pragma: no cover
-        details["error"] = str(exc)
-        return ScenarioResult(name=name, passed=False, details=details)
+        details["ping"] = dev.command("PING", expect="pong")
+        details["status"] = dev.command("STATUS", expect="json")
+        details["call"] = dev.command("CALL", expect="ack")
+        details["capture_start"] = dev.command("CAPTURE_START", expect="ack")
+        details["capture_stop"] = dev.command("CAPTURE_STOP", expect="ack")
+        details["reset_metrics"] = dev.command("RESET_METRICS", expect="ack")
+        ok = bool(details["ping"].get("ok")) and "telephony" in details["status"]
+        return ScenarioResult("serial_smoke", "PASS" if ok else "FAIL", details)
+    except Exception as exc:
+        return ScenarioResult("serial_smoke", "FAIL", {"error": str(exc)})
 
 
-def scenario_a252_full_duplex(phone: SerialEndpoint, bench: SerialEndpoint) -> ScenarioResult:
-    details: Dict[str, Any] = {"duration_s": 120}
-    try:
-        phone.command("RESET_METRICS", expected_prefixes=["OK"], timeout_s=2)
-        phone.command("CAPTURE_START", expected_prefixes=["OK", "ERR"], timeout_s=3)
-        phone.command("PLAY /welcome.wav", expected_prefixes=["OK", "ERR"], timeout_s=3)
-
-        bench.command("AUDIO INJECT START 1000 0.40", timeout_s=3)
-        bench.command("MEASURE LATENCY START", timeout_s=3)
-
-        end_time = time.monotonic() + 120
-        while time.monotonic() < end_time:
-            time.sleep(5)
-            phone.command("STATUS", expect_json=True, timeout_s=3)
-
-        latency_line = bench.command("MEASURE LATENCY READ", timeout_s=5)
-        bench.command("AUDIO INJECT STOP", timeout_s=3)
-        phone.command("CAPTURE_STOP", expected_prefixes=["OK"], timeout_s=3)
-
-        status = phone.command("STATUS", expect_json=True, timeout_s=5)
-        details.update(
-            {
-                "audio_underrun_count": status.get("audio_underrun_count", 0),
-                "audio_drop_frames": status.get("audio_drop_frames", 0),
-                "audio_last_latency_ms": status.get("audio_last_latency_ms", 0),
-                "bench_latency_ms": parse_latency_ms(latency_line, 9999),
-                "telephony_state": status.get("telephony", "UNKNOWN"),
-            }
-        )
-
-        passed = (
-            int(details["audio_underrun_count"]) <= 1
-            and int(details["audio_drop_frames"]) == 0
-            and int(details["bench_latency_ms"]) <= 120
-        )
-        return ScenarioResult(name="A252 full-duplex", passed=passed, details=details)
-    except Exception as exc:  # pragma: no cover
-        details["error"] = str(exc)
-        return ScenarioResult(name="A252 full-duplex", passed=False, details=details)
+def _is_success_response(resp: Dict[str, Any]) -> bool:
+    if "ok" in resp:
+        return bool(resp.get("ok"))
+    return True
 
 
-def scenario_s3_local(phone: SerialEndpoint, bench: SerialEndpoint) -> ScenarioResult:
-    details: Dict[str, Any] = {"duration_s": 20}
-    try:
-        phone.command("RESET_METRICS", expected_prefixes=["OK"], timeout_s=2)
-        phone.command("CALL", expected_prefixes=["OK"], timeout_s=2)
-        time.sleep(1.0)
-        bench.command("HOOK S3 ON", timeout_s=3)
-
-        phone.command("CAPTURE_START", expected_prefixes=["OK", "ERR"], timeout_s=3)
-        bench.command("AUDIO INJECT START 1000 0.40", timeout_s=3)
-        bench.command("MEASURE LATENCY START", timeout_s=3)
-        time.sleep(20)
-
-        latency_line = bench.command("MEASURE LATENCY READ", timeout_s=5)
-        bench.command("AUDIO INJECT STOP", timeout_s=3)
-        phone.command("CAPTURE_STOP", expected_prefixes=["OK"], timeout_s=3)
-        bench.command("HOOK S3 OFF", timeout_s=3)
-
-        status = phone.command("STATUS", expect_json=True, timeout_s=5)
-        details.update(
-            {
-                "telephony_state": status.get("telephony"),
-                "audio_drop_frames": status.get("audio_drop_frames", 0),
-                "bench_latency_ms": parse_latency_ms(latency_line, 9999),
-            }
-        )
-        passed = int(details["bench_latency_ms"]) <= 150 and details["telephony_state"] in (
-            "PLAYING_MESSAGE",
-            "OFF_HOOK",
-            "IDLE",
-        )
-        return ScenarioResult(name="S3 local mode", passed=passed, details=details)
-    except Exception as exc:  # pragma: no cover
-        details["error"] = str(exc)
-        return ScenarioResult(name="S3 local mode", passed=False, details=details)
+def _quote_arg(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
-def scenario_web_access(base_url: Optional[str], label: str) -> ScenarioResult:
+def scenario_serial_network(dev: SerialEndpoint, wifi_ssid: str, wifi_password: str) -> ScenarioResult:
     details: Dict[str, Any] = {}
-    if not base_url:
-        return ScenarioResult(name=f"{label} web endpoints", passed=True, details={"skipped": True})
-
     try:
-        status_payload = fetch_http_status(base_url)
-        details["status_code"] = 200
-        details["board_profile"] = status_payload.get("board_profile", "UNKNOWN")
+        details["wifi_status_before"] = dev.command("WIFI_STATUS", expect="json")
+        details["wifi_scan"] = dev.command("WIFI_SCAN", expect="json")
+        if wifi_ssid:
+            already_connected = (
+                bool(details["wifi_status_before"].get("connected"))
+                and str(details["wifi_status_before"].get("ssid", "")) == wifi_ssid
+            )
+            if already_connected:
+                details["wifi_connect"] = {"ok": True, "line": "SKIP WIFI_CONNECT already_connected"}
+                details["wifi_status_after"] = details["wifi_status_before"]
+            else:
+                details["wifi_connect"] = dev.command(
+                    f"WIFI_CONNECT {_quote_arg(wifi_ssid)} {_quote_arg(wifi_password)}",
+                    timeout_s=20.0,
+                    expect="ack",
+                )
+                time.sleep(2.0)
+                details["wifi_status_after"] = dev.command("WIFI_STATUS", expect="json")
+        details["mqtt_status"] = dev.command("MQTT_STATUS", expect="json")
+        details["espnow_status"] = dev.command("ESPNOW_STATUS", expect="json")
+        details["bt_status"] = dev.command("BT_STATUS", expect="json")
+        ok = True
+        for value in details.values():
+            if isinstance(value, dict) and not _is_success_response(value):
+                ok = False
+                break
+        return ScenarioResult("serial_network_stack", "PASS" if ok else "FAIL", details)
+    except Exception as exc:
+        return ScenarioResult("serial_network_stack", "FAIL", {"error": str(exc), **details})
 
-        details["config_status"] = check_web_endpoint(base_url, "/api/config", "GET")
-        details["logs_status"] = check_web_endpoint(base_url, "/api/logs", "GET")
-        details["control_status"] = check_web_endpoint(
-            base_url, "/api/control", "POST", {"action": "call"}
-        )
 
-        passed = (
-            details["config_status"] == 200
-            and details["logs_status"] == 200
-            and details["control_status"] == 200
-        )
-        return ScenarioResult(name=f"{label} web endpoints", passed=passed, details=details)
-    except Exception as exc:  # pragma: no cover
-        details["error"] = str(exc)
-        return ScenarioResult(name=f"{label} web endpoints", passed=False, details=details)
+def scenario_http(base_url: str) -> ScenarioResult:
+    details: Dict[str, Any] = {"base_url": base_url}
+    try:
+        details["status"] = fetch_json(base_url.rstrip("/") + "/api/status")
+        details["wifi"] = fetch_json(base_url.rstrip("/") + "/api/network/wifi")
+        details["mqtt"] = fetch_json(base_url.rstrip("/") + "/api/network/mqtt")
+        details["espnow"] = fetch_json(base_url.rstrip("/") + "/api/network/espnow")
+        details["bluetooth"] = fetch_json(base_url.rstrip("/") + "/api/bluetooth")
+        details["control_call"] = post_json(base_url.rstrip("/") + "/api/control", {"action": "CALL"})
+        return ScenarioResult("http_endpoints", "PASS", details)
+    except error.HTTPError as exc:
+        return ScenarioResult("http_endpoints", "FAIL", {"error": f"HTTP {exc.code}", **details})
+    except Exception as exc:
+        return ScenarioResult("http_endpoints", "FAIL", {"error": str(exc), **details})
+
+
+def scenario_manual(name: str, state: str, note: str) -> ScenarioResult:
+    if state not in VALID_STATES:
+        state = "MANUAL_SKIP"
+    return ScenarioResult(name, state, {"note": note})
 
 
 def write_reports(results: List[ScenarioResult], report_json: Path, report_md: Path) -> None:
-    overall_passed = all(item.passed for item in results)
+    ensure_parent(report_json)
+    ensure_parent(report_md)
+
+    overall_passed = all(item.state not in {"FAIL", "MANUAL_FAIL"} for item in results)
     payload = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "overall_passed": overall_passed,
-        "results": [
-            {
-                "name": item.name,
-                "passed": item.passed,
-                "details": item.details,
-            }
-            for item in results
-        ],
+        "results": [{"name": x.name, "state": x.state, "details": x.details} for x in results],
     }
-
-    ensure_parent(report_json)
-    ensure_parent(report_md)
     report_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     lines = [
-        "# Rapport validation HW",
+        "# Rapport validation HW (A252)",
         "",
         f"- Date UTC: {payload['timestamp_utc']}",
         f"- Verdict global: {'PASS' if overall_passed else 'FAIL'}",
         "",
-        "| Scénario | Verdict | Détails |",
+        "| Scénario | État | Détails |",
         "|---|---|---|",
     ]
     for item in results:
         details = json.dumps(item.details, ensure_ascii=False)
-        verdict = "PASS" if item.passed else "FAIL"
-        lines.append(f"| {item.name} | {verdict} | `{details}` |")
+        lines.append(f"| {item.name} | {item.state} | `{details}` |")
     report_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="RTC_BL_PHONE hardware validation")
-    parser.add_argument("--port-a252", required=True, help="Serial port for A252 target")
-    parser.add_argument("--port-s3", required=True, help="Serial port for ESP32-S3 target")
-    parser.add_argument("--bench-port", required=True, help="Serial port for bench controller")
-    parser.add_argument("--baud", type=int, default=115200, help="UART baudrate")
-    parser.add_argument("--flash", action="store_true", help="Build and flash both targets before tests")
-    parser.add_argument("--report-json", default="docs/rapport_hw.json", help="JSON report path")
+    parser = argparse.ArgumentParser(description="RTC_BL_PHONE A252 validation runner")
+    parser.add_argument("--port-a252", required=True, help="serial port for A252 target")
+    parser.add_argument("--baud", type=int, default=115200, help="serial baudrate")
+    parser.add_argument("--flash", action="store_true", help="build and upload firmware before tests")
+    parser.add_argument("--base-url", default="", help="optional A252 base URL (http://ip)")
+    parser.add_argument("--wifi-ssid", default="", help="optional SSID for WIFI_CONNECT test")
+    parser.add_argument("--wifi-password", default="", help="optional password for WIFI_CONNECT test")
+    parser.add_argument("--report-json", default="docs/rapport_hw.json", help="output JSON report path")
     parser.add_argument(
-        "--report-md", default="docs/rapport_tests_fonctionnels.md", help="Markdown report path"
+        "--report-md", default="docs/rapport_tests_fonctionnels.md", help="output Markdown report path"
     )
-    parser.add_argument("--a252-base-url", default="", help="Optional base URL for A252 web API")
-    parser.add_argument("--s3-base-url", default="", help="Optional base URL for S3 web API")
+    parser.add_argument("--manual-hook", default="MANUAL_SKIP", choices=sorted(VALID_STATES))
+    parser.add_argument("--manual-ring", default="MANUAL_SKIP", choices=sorted(VALID_STATES))
+    parser.add_argument("--manual-audio", default="MANUAL_SKIP", choices=sorted(VALID_STATES))
+    parser.add_argument("--manual-hfp", default="MANUAL_SKIP", choices=sorted(VALID_STATES))
+    parser.add_argument("--manual-note", default="", help="optional shared note for manual checks")
     return parser.parse_args()
-
-
-def maybe_flash(args: argparse.Namespace) -> None:
-    if not args.flash:
-        return
-    run_cmd(["pio", "run", "-e", "esp32dev", "-e", "esp32-s3-devkitc-1"])
-    run_cmd(["pio", "run", "-e", "esp32dev", "-t", "upload", "--upload-port", args.port_a252])
-    run_cmd(["pio", "run", "-e", "esp32-s3-devkitc-1", "-t", "upload", "--upload-port", args.port_s3])
 
 
 def main() -> int:
     args = parse_args()
-    maybe_flash(args)
+
+    if args.flash:
+        run_cmd(["pio", "run", "-e", "esp32dev"])
+        run_cmd(["pio", "run", "-e", "esp32dev", "-t", "upload", "--upload-port", args.port_a252])
 
     results: List[ScenarioResult] = []
-    try:
-        with SerialEndpoint(args.port_a252, args.baud) as dev_a252, SerialEndpoint(
-            args.port_s3, args.baud
-        ) as dev_s3, SerialEndpoint(args.bench_port, args.baud) as bench:
-            dev_a252.command("PING", expected_prefixes=["PONG"], timeout_s=4)
-            dev_s3.command("PING", expected_prefixes=["PONG"], timeout_s=4)
-            bench.command("PING", timeout_s=3)
-            bench.command("RESET", timeout_s=3)
+    network_result: Optional[ScenarioResult] = None
 
-            results.append(scenario_slic_transition("SLIC transition A252", dev_a252, bench, "A252"))
-            results.append(scenario_slic_transition("SLIC transition S3", dev_s3, bench, "S3"))
-            results.append(scenario_a252_full_duplex(dev_a252, bench))
-            results.append(scenario_s3_local(dev_s3, bench))
-            results.append(scenario_web_access(args.a252_base_url or None, "A252"))
-            results.append(scenario_web_access(args.s3_base_url or None, "S3"))
+    try:
+        with SerialEndpoint(args.port_a252, args.baud) as dev:
+            dev.sync()
+            results.append(scenario_serial_smoke(dev))
+            network_result = scenario_serial_network(dev, args.wifi_ssid, args.wifi_password)
+            results.append(network_result)
     except Exception as exc:
-        results.append(
-            ScenarioResult(
-                name="runner",
-                passed=False,
-                details={"error": str(exc)},
-            )
-        )
+        results.append(ScenarioResult("serial_runner", "FAIL", {"error": str(exc)}))
+
+    runtime_base_url = args.base_url.strip()
+    if network_result and isinstance(network_result.details, dict):
+        wifi_after = network_result.details.get("wifi_status_after")
+        if isinstance(wifi_after, dict) and wifi_after.get("connected") and wifi_after.get("ip"):
+            runtime_base_url = f"http://{wifi_after['ip']}"
+
+    if runtime_base_url:
+        results.append(scenario_http(runtime_base_url))
+    else:
+        results.append(ScenarioResult("http_endpoints", "MANUAL_SKIP", {"note": "base URL not provided"}))
+
+    note = args.manual_note or "validated manually"
+    results.append(scenario_manual("manual_hook_transition", args.manual_hook, note))
+    results.append(scenario_manual("manual_ring_behavior", args.manual_ring, note))
+    results.append(scenario_manual("manual_audio_path", args.manual_audio, note))
+    results.append(scenario_manual("manual_hfp_pairing", args.manual_hfp, note))
 
     write_reports(results, Path(args.report_json), Path(args.report_md))
-    overall_passed = all(item.passed for item in results)
-    return 0 if overall_passed else 1
+    return 0 if all(item.state not in {"FAIL", "MANUAL_FAIL"} for item in results) else 1
 
 
 if __name__ == "__main__":

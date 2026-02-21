@@ -16,6 +16,8 @@ struct AudioConfig {
     int data_out_pin = 26;
     int data_in_pin = 35;
     bool enable_capture = true;
+    uint8_t dma_buf_count = 8;
+    uint16_t dma_buf_len = 256;
 };
 
 struct AudioRuntimeMetrics {
@@ -31,9 +33,10 @@ AudioConfig defaultAudioConfigForProfile(BoardProfile profile);
 
 class AudioEngine {
 public:
-    virtual ~AudioEngine() = default;
+    virtual ~AudioEngine();
     AudioEngine();
     virtual bool begin(const AudioConfig& config);
+    virtual void end();
     virtual bool playFile(const char* path);
     virtual bool startCapture();
     virtual size_t readCaptureFrame(int16_t* dst, size_t samples);
@@ -43,15 +46,18 @@ public:
     virtual AudioRuntimeMetrics metrics() const;
     virtual void resetMetrics();
     virtual void tick();
+    const AudioConfig& config() const;
 
 private:
-    bool driver_installed_;
-    bool capture_active_;
-    bool playing_;
-    uint32_t play_until_ms_;
-    AudioConfig config_;
+    bool driver_installed_ = false;
+    bool capture_active_ = false;
+    bool playing_ = false;
+    uint32_t play_until_ms_ = 0;
+    AudioConfig _config;
     FeatureMatrix features_;
     AudioRuntimeMetrics metrics_;
+    i2s_config_t _i2s_config{};
+    i2s_pin_config_t _i2s_pins{};
 };
 
 #endif  // AUDIO_ENGINE_H

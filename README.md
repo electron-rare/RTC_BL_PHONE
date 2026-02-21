@@ -266,6 +266,21 @@ bt.sendData(buffer, length);
 
 ---
 
+## Contrôle MQTT, ESP-NOW et DTMF logiciel
+
+- Contrôle distant via MQTT (ArduinoProps) : topics `rtc_bl_phone/<device_id>/in` (commandes), `rtc_bl_phone/<device_id>/out` (événements).
+- Contrôle local via ESP-NOW (même schéma JSON).
+- Détection DTMF logicielle (Goertzel) : les chiffres détectés sont publiés dans les événements.
+- Limitations ESP32-S3 : pas de Bluetooth Classic, uniquement BLE (les fonctions BT Classic sont désactivées sur S3).
+
+**Exemples** :
+- Publier une commande MQTT :
+  `mosquitto_pub -t rtc_bl_phone/mondevice/in -m '{"cmd":"CALL"}'`
+- Écouter les événements :
+  `mosquitto_sub -t rtc_bl_phone/mondevice/out`
+
+Voir aussi `docs/props.md` pour le schéma détaillé.
+
 ## Résumé des fichiers modifiés/créés
 - README.md : ajout de la documentation technique détaillée des modules AudioManager, RTOSManager, BluetoothManager.
   

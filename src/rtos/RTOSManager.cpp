@@ -1,3 +1,11 @@
+
+#include <Arduino.h>
+#include "core/AgentSupervisor.h"
+
+void notifyRTOS(const std::string& state, const std::string& error = "") {
+    AgentStatus status{state, error, millis()};
+    AgentSupervisor::instance().notify("rtos", status);
+}
 #include "RTOSManager.h"
 #include <Arduino.h>
 #include <cstdlib>
@@ -8,6 +16,7 @@ RTOSManager::RTOSManager() {}
 bool RTOSManager::begin() {
     initialized = true;
     Serial.println("RTOSManager: Initialisation OK");
+    notifyRTOS("initialized");
     return initialized;
 }
 
@@ -15,9 +24,11 @@ bool RTOSManager::createTask(const char* name, void (*taskFunc)(void*), uint16_t
     BaseType_t res = xTaskCreate(taskFunc, name, stackSize, params, priority, nullptr);
     if (res != pdPASS) {
         Serial.printf("RTOSManager: Échec création tâche %s\n", name);
+        notifyRTOS("task_failed", name);
         return false;
     }
     Serial.printf("RTOSManager: Tâche %s créée\n", name);
+    notifyRTOS("task_created", name);
     return true;
 }
 
@@ -59,11 +70,13 @@ void RTOSManager::enableWatchdog(uint32_t timeoutMs) {
     watchdogEnabled = true;
     watchdogTimeout = timeoutMs;
     Serial.printf("RTOSManager: Watchdog activé (%lu ms)\n", watchdogTimeout);
+     notifyRTOS("watchdog_enabled");
 }
 
 void RTOSManager::feedWatchdog() {
     if (watchdogEnabled) {
         esp_task_wdt_reset();
         Serial.println("RTOSManager: Watchdog feed");
+        notifyRTOS("watchdog_feed");
     }
 }
