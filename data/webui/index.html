@@ -32,6 +32,29 @@
         <button id="refreshConfigBtn">Rafraîchir configuration</button>
       </div>
       <pre id="configJson"></pre>
+      <div class="grid2">
+        <div>
+          <h3>Audio config (JSON)</h3>
+          <textarea id="audioConfigInput" rows="8" placeholder='{"volume":80}'></textarea>
+          <div class="inline-actions">
+            <button id="applyAudioConfigBtn">Appliquer audio</button>
+          </div>
+        </div>
+        <div>
+          <h3>MQTT config (JSON)</h3>
+          <textarea id="mqttConfigInput" rows="8" placeholder='{"enabled":false}'></textarea>
+          <div class="inline-actions">
+            <button id="applyMqttConfigBtn">Appliquer MQTT</button>
+          </div>
+        </div>
+        <div>
+          <h3>Pins config (JSON)</h3>
+          <textarea id="pinsConfigInput" rows="8" placeholder='{"slic":{"line":23}}'></textarea>
+          <div class="inline-actions">
+            <button id="applyPinsConfigBtn">Appliquer pins</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="networkSection">
@@ -85,6 +108,21 @@
           </div>
           <pre id="espnowJson"></pre>
           <pre id="espnowPeersJson"></pre>
+        </div>
+
+        <div>
+          <h3>Bluetooth</h3>
+          <form id="btHfpConnectForm">
+            <input type="text" id="btHfpAddr" placeholder="MAC téléphone HFP (AA:BB:CC:DD:EE:FF)">
+            <button type="submit">HFP Connect</button>
+          </form>
+          <div class="inline-actions">
+            <button id="btHfpDisconnectBtn">HFP Disconnect</button>
+            <button id="btBleStartBtn">BLE Start</button>
+            <button id="btBleStopBtn">BLE Stop</button>
+            <button id="btRefreshBtn">Rafraîchir BT</button>
+          </div>
+          <pre id="btJson"></pre>
         </div>
       </div>
     </section>
