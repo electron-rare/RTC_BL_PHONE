@@ -79,6 +79,14 @@ _Agent Repo & GitHub – README généré automatiquement._
 5. Ouvrir le moniteur série à 115200 bauds.
 6. Connecter puis piloter les appels via commandes série.
 
+## Orchestration ZeroClaw (préflight + agent)
+
+- Guide: `docs/zeroclaw_orchestration.md`
+- Préflight hardware avant upload:
+  - `python3 scripts/zeroclaw_hw_preflight.py --require-port`
+- Conversation agent ciblée RTC (depuis `Kill_LIFE`):
+  - `tools/ai/zeroclaw_dual_chat.sh rtc -m "fais un état hardware et propose 3 actions"`
+
 ## Commandes série
 - `h` : aide
 - `s` : statut runtime (hook, HFP, audio, call)

@@ -218,6 +218,11 @@ _pkginfo.txt
 
 # Visual Studio cache files
 *.[Cc]ache
+
+# ZeroClaw local runtime (generated locally, never committed)
+/.zeroclaw/
+/config.toml
+/workspace/
 !?*.[Cc]ache/
 
 # Others
