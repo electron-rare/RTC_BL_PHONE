@@ -1,0 +1,71 @@
+{
+  "timestamp_utc": "2026-02-21T03:15:00Z",
+  "scope": "esp32_audio_dev_a252_only",
+  "overall_passed": true,
+  "bench_context": {
+    "active_env": "esp32dev",
+    "flash_port": "/dev/cu.SLAB_USBtoUART",
+    "s3_present": false
+  },
+  "results": [
+    {
+      "name": "ZeroClaw preflight",
+      "passed": true,
+      "details": {
+        "command": "python3 scripts/zeroclaw_hw_preflight.py --require-port --zeroclaw-bin /Users/cils/Documents/Lelectron_rare/Kill_LIFE/zeroclaw/target/release/zeroclaw",
+        "ports_seen": [
+          "/dev/tty.SLAB_USBtoUART",
+          "/dev/tty.usbserial-0001",
+          "/dev/tty.usbmodem5AB90753301"
+        ]
+      }
+    },
+    {
+      "name": "esp32dev build",
+      "passed": true,
+      "details": {
+        "command": "pio run -e esp32dev"
+      }
+    },
+    {
+      "name": "esp32dev upload",
+      "passed": true,
+      "details": {
+        "command": "pio run -e esp32dev -t upload --upload-port /dev/cu.SLAB_USBtoUART"
+      }
+    },
+    {
+      "name": "serial smoke",
+      "passed": true,
+      "details": {
+        "ping": "PONG",
+        "status_keys": [
+          "board_profile",
+          "telephony",
+          "hook",
+          "full_duplex",
+          "audio_drop_frames"
+        ],
+        "status_snapshot": {
+          "board_profile": "ESP32_A252",
+          "full_duplex": true,
+          "audio_drop_frames": 0
+        }
+      }
+    },
+    {
+      "name": "startup stability",
+      "passed": true,
+      "details": {
+        "fixed_issue": "lwIP Invalid mbox reboot loop",
+        "evidence": [
+          "[RTC_BL_PHONE] AP ready: ssid=RTC_BL_PHONE ip=192.168.4.1",
+          "[WebServerManager] HTTP server started"
+        ]
+      }
+    }
+  ],
+  "notes": [
+    "Run execute on ESP32 audio dev only; S3 validation skipped for this bench."
+  ]
+}

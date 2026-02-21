@@ -45,3 +45,34 @@ Tous les modules ont été testés individuellement et en intégration. Les rés
 Tous les modules sont validés, robustes et intégrés. La traçabilité, la sécurité et la documentation sont assurées. Prêt pour la phase suivante ou la livraison.
 
 **Version :** 2026-02-17
+
+---
+
+## Campagne terrain ZeroClaw — 2026-02-21 (ESP32 audio dev)
+
+Contexte:
+
+- Cible active: `esp32dev` (ESP32 audio dev)
+- Port flash: `/dev/cu.SLAB_USBtoUART`
+- Scope: terminal build/flash/smoke, sans carte S3 sur ce bench
+
+Resultats:
+
+- Preflight ZeroClaw USB: OK
+- Build `pio run -e esp32dev`: OK
+- Upload `pio run -e esp32dev -t upload --upload-port /dev/cu.SLAB_USBtoUART`: OK
+- Smoke serie:
+  - `PING` => `PONG` (OK)
+  - `STATUS` => JSON complet (OK)
+
+Incident corrige pendant la campagne:
+
+- Reboot loop `lwIP Invalid mbox` au demarrage web.
+- Cause: `AsyncWebServer::begin()` lance avant init reseau.
+- Correctif applique:
+  - init Wi-Fi AP (`RTC_BL_PHONE`) avant `g_web.begin()`
+  - correction payload `STATUS` (`doc.as<JsonObject>()` au lieu de `doc.to<JsonObject>()`)
+
+Verdict campagne 2026-02-21:
+
+- PASS pour le flux `esp32dev` en terminal.
