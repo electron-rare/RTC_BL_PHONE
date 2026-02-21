@@ -844,6 +844,13 @@ void setup() {
     g_features = getFeatureMatrix(g_profile);
 
     A252ConfigStore::loadPins(g_pins_cfg);
+    // Hard-wired SLIC mapping for live bench tests.
+    g_pins_cfg.slic_rm = 18;
+    g_pins_cfg.slic_fr = 5;
+    g_pins_cfg.slic_shk = 23;
+    g_pins_cfg.slic_line = 21;
+    g_pins_cfg.slic_pd = 19;
+    g_pins_cfg.hook_active_high = true;
     A252ConfigStore::loadAudio(g_audio_cfg);
     A252ConfigStore::loadMqtt(g_mqtt_cfg);
     A252ConfigStore::loadEspNowPeers(g_peer_store);
