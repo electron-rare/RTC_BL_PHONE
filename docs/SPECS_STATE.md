@@ -3,6 +3,7 @@
 ## 1) Index des specs
 
 - `docs/spec_webui_route_parity_and_coverage_v1.md` (spécification principale active)
+- `docs/spec_bt_hfp_pbap_dialing_v1.md` (nouvelle spec téléphonie Bluetooth, statut `Draft`)
 - Notion hub: `RTC_BL_PHONE Delivery Hub`
 - Notion spec mirror: `RTC_BL_PHONE - Spec - WebUI Route Parity v1`
 - Notion plan: `RTC_BL_PHONE - Plan d'implementation - Route Parity Closure`
@@ -24,6 +25,14 @@
 - `scripts/check_web_route_parity.py` (local) : backend routes 29, frontend routes 29, check passé
 - `scripts/check_web_route_parity.py --report-json artifacts/route_parity_report.json` : OK (report généré)
 - `platformio run -e esp32-s3-devkitc-1` : échec connu sur liens Bluetooth/HFP externes (suivi séparé)
+
+## 3-bis) État spec BT HFP/PBAP/Numérotation
+
+- HFP commande-level: OK (connect/disconnect commandes acceptées).
+- HFP call-control AT: implémenté (`BT_DIAL`/`DIAL`, `BT_REDIAL`, `BT_ANSWER`, `BT_HANGUP`, `BT_CALLS`).
+- HFP liaison réelle: KO sur tests assistés (pas de montée `connected=true`/`hfp_active=true`).
+- PBAP: bloqué sur stack actuelle (`arduino-esp32` bluedroid sans API PBAP exposée côté firmware), `BT_PBAP_SYNC` retourne `unsupported`.
+- Numérotation HFP/AT: implémentée côté firmware, validation E2E téléphone encore à obtenir (dépend de la liaison HFP réelle).
 
 ## 4) Lacunes à combler pour passer la spec en `DONE`
 

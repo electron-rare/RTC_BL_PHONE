@@ -14,6 +14,7 @@
 #include <esp_gap_bt_api.h>
 #include <esp_hf_client_api.h>
 
+#include <cctype>
 #include <cstring>
 
 namespace {
@@ -41,6 +42,94 @@ String errToString(esp_err_t err) {
     char buf[16];
     snprintf(buf, sizeof(buf), "0x%04x", static_cast<unsigned>(err));
     return String(buf);
+}
+
+bool isDialableChar(char c) {
+    return (c >= '0' && c <= '9') || c == '+' || c == '*' || c == '#' || c == ',' || c == 'p' || c == 'P' ||
+           c == 'w' || c == 'W';
+}
+
+bool isValidDialNumber(const String& number) {
+    if (number.isEmpty()) {
+        return false;
+    }
+    for (size_t i = 0; i < static_cast<size_t>(number.length()); ++i) {
+        if (!isDialableChar(number[static_cast<unsigned int>(i)])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+const char* callSetupStateToString(esp_hf_call_setup_status_t status) {
+    switch (status) {
+        case ESP_HF_CALL_SETUP_STATUS_IDLE:
+            return "idle";
+        case ESP_HF_CALL_SETUP_STATUS_INCOMING:
+            return "ringing";
+        case ESP_HF_CALL_SETUP_STATUS_OUTGOING_DIALING:
+            return "dialing";
+        case ESP_HF_CALL_SETUP_STATUS_OUTGOING_ALERTING:
+            return "alerting";
+        default:
+            return "unknown";
+    }
+}
+
+const char* callHeldStateToString(esp_hf_call_held_status_t status) {
+    switch (status) {
+        case ESP_HF_CALL_HELD_STATUS_NONE:
+            return "active";
+        case ESP_HF_CALL_HELD_STATUS_HELD_AND_ACTIVE:
+            return "held_active";
+        case ESP_HF_CALL_HELD_STATUS_HELD:
+            return "held";
+        default:
+            return "unknown";
+    }
+}
+
+const char* clccStateToString(esp_hf_current_call_status_t status) {
+    switch (status) {
+        case ESP_HF_CURRENT_CALL_STATUS_ACTIVE:
+            return "active";
+        case ESP_HF_CURRENT_CALL_STATUS_HELD:
+            return "held";
+        case ESP_HF_CURRENT_CALL_STATUS_DIALING:
+            return "dialing";
+        case ESP_HF_CURRENT_CALL_STATUS_ALERTING:
+            return "alerting";
+        case ESP_HF_CURRENT_CALL_STATUS_INCOMING:
+        case ESP_HF_CURRENT_CALL_STATUS_WAITING:
+            return "ringing";
+        case ESP_HF_CURRENT_CALL_STATUS_HELD_BY_RESP_HOLD:
+            return "held";
+        default:
+            return "unknown";
+    }
+}
+
+const char* atResponseCodeToString(esp_hf_at_response_code_t code) {
+    switch (code) {
+        case ESP_HF_AT_RESPONSE_CODE_OK:
+            return "ok";
+        case ESP_HF_AT_RESPONSE_CODE_ERR:
+            return "error";
+        case ESP_HF_AT_RESPONSE_CODE_NO_CARRIER:
+            return "no_carrier";
+        case ESP_HF_AT_RESPONSE_CODE_BUSY:
+            return "busy";
+        case ESP_HF_AT_RESPONSE_CODE_NO_ANSWER:
+            return "no_answer";
+        case ESP_HF_AT_RESPONSE_CODE_DELAYED:
+            return "delayed";
+        case ESP_HF_AT_RESPONSE_CODE_BLACKLISTED:
+            return "blacklisted";
+        case ESP_HF_AT_RESPONSE_CODE_CME:
+            return "cme";
+        default:
+            return "unknown";
+    }
 }
 
 void btGapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* param) {
@@ -144,11 +233,18 @@ BluetoothManager::BluetoothManager()
       ble_client_connected_(false),
       connected_(false),
       hfp_active_(false),
+      slc_connected_(false),
       ble_active_(false),
+      discoverable_(false),
       security_enabled_(false),
+      pbap_supported_(false),
+      pbap_synced_(false),
       peer_mac_(""),
       peer_addr_{0},
       peer_addr_valid_(false),
+      call_state_("idle"),
+      last_dialed_number_(""),
+      pbap_last_error_("pbap_not_available_on_esp32_arduino_bluedroid"),
       last_hfp_event_("idle"),
       last_ble_event_("idle"),
       last_error_(""),
@@ -159,10 +255,15 @@ bool BluetoothManager::begin(BoardProfile profile) {
     features_ = getFeatureMatrix(profile);
     connected_ = false;
     hfp_active_ = false;
+    slc_connected_ = false;
     ble_active_ = false;
+    discoverable_ = false;
+    pbap_synced_ = false;
     ble_client_connected_ = false;
     peer_mac_ = "";
     peer_addr_valid_ = false;
+    call_state_ = "idle";
+    last_dialed_number_ = "";
     memset(peer_addr_, 0, sizeof(peer_addr_));
     last_error_ = "";
     last_hfp_event_ = "initialized";
@@ -363,10 +464,17 @@ void BluetoothManager::statusToJson(JsonObject obj) const {
     obj["stack_ready"] = stack_ready_;
     obj["connected"] = connected_;
     obj["hfp_active"] = hfp_active_;
+    obj["slc_connected"] = slc_connected_;
     obj["hfp_requested"] = hfp_requested_;
+    obj["call_state"] = call_state_;
+    obj["last_dialed_number"] = last_dialed_number_;
     obj["ble_active"] = ble_active_;
+    obj["discoverable"] = discoverable_;
     obj["ble_client_connected"] = ble_client_connected_;
     obj["security_enabled"] = security_enabled_;
+    obj["pbap_supported"] = pbap_supported_;
+    obj["pbap_synced"] = pbap_synced_;
+    obj["pbap_last_error"] = pbap_last_error_;
     obj["peer"] = peer_mac_;
     obj["last_hfp_event"] = last_hfp_event_;
     obj["last_ble_event"] = last_ble_event_;
@@ -377,6 +485,137 @@ void BluetoothManager::statusToJson(JsonObject obj) const {
 
 void BluetoothManager::setSecurity(bool enabled) {
     security_enabled_ = enabled;
+}
+
+bool BluetoothManager::setDiscoverable(bool enabled) {
+    if (!ensureBtStackReady()) {
+        return false;
+    }
+    const esp_bt_discovery_mode_t mode =
+        enabled ? ESP_BT_GENERAL_DISCOVERABLE : ESP_BT_NON_DISCOVERABLE;
+    const esp_err_t err = esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, mode);
+    if (err != ESP_OK) {
+        last_error_ = "bt_discoverable_failed:" + errToString(err);
+        notifyBluetooth("discoverable_failed", last_error_.c_str());
+        return false;
+    }
+    discoverable_ = enabled;
+    last_error_ = "";
+    notifyBluetooth(enabled ? "discoverable_on" : "discoverable_off");
+    publishBleStatus();
+    return true;
+}
+
+bool BluetoothManager::dial(const String& number) {
+    if (!requireCallControlReady("dial")) {
+        return false;
+    }
+
+    String dialed = number;
+    dialed.trim();
+    if (!isValidDialNumber(dialed)) {
+        last_error_ = "dial_invalid_number";
+        notifyBluetooth("hfp_dial_failed", last_error_.c_str());
+        return false;
+    }
+
+    const esp_err_t err = esp_hf_client_dial(dialed.c_str());
+    if (err != ESP_OK) {
+        last_error_ = "hfp_dial_failed:" + errToString(err);
+        notifyBluetooth("hfp_dial_failed", last_error_.c_str());
+        return false;
+    }
+
+    last_dialed_number_ = dialed;
+    call_state_ = "dialing";
+    last_hfp_event_ = "dial_requested";
+    notifyBluetooth("hfp_dial_requested");
+    publishBleStatus();
+    return true;
+}
+
+bool BluetoothManager::redial() {
+    if (!requireCallControlReady("redial")) {
+        return false;
+    }
+
+    const esp_err_t err = esp_hf_client_dial(nullptr);
+    if (err != ESP_OK) {
+        last_error_ = "hfp_redial_failed:" + errToString(err);
+        notifyBluetooth("hfp_redial_failed", last_error_.c_str());
+        return false;
+    }
+
+    call_state_ = "dialing";
+    last_hfp_event_ = "redial_requested";
+    notifyBluetooth("hfp_redial_requested");
+    publishBleStatus();
+    return true;
+}
+
+bool BluetoothManager::answerCall() {
+    if (!requireCallControlReady("answer")) {
+        return false;
+    }
+
+    const esp_err_t err = esp_hf_client_answer_call();
+    if (err != ESP_OK) {
+        last_error_ = "hfp_answer_failed:" + errToString(err);
+        notifyBluetooth("hfp_answer_failed", last_error_.c_str());
+        return false;
+    }
+
+    call_state_ = "active";
+    last_hfp_event_ = "answer_requested";
+    notifyBluetooth("hfp_answer_requested");
+    publishBleStatus();
+    return true;
+}
+
+bool BluetoothManager::hangupCall() {
+    if (!requireCallControlReady("hangup")) {
+        return false;
+    }
+
+    const esp_err_t err = esp_hf_client_reject_call();
+    if (err != ESP_OK) {
+        last_error_ = "hfp_hangup_failed:" + errToString(err);
+        notifyBluetooth("hfp_hangup_failed", last_error_.c_str());
+        return false;
+    }
+
+    call_state_ = "ending";
+    last_hfp_event_ = "hangup_requested";
+    notifyBluetooth("hfp_hangup_requested");
+    publishBleStatus();
+    return true;
+}
+
+bool BluetoothManager::queryCurrentCalls() {
+    if (!requireCallControlReady("calls_query")) {
+        return false;
+    }
+
+    const esp_err_t err = esp_hf_client_query_current_calls();
+    if (err != ESP_OK) {
+        last_error_ = "hfp_calls_query_failed:" + errToString(err);
+        notifyBluetooth("hfp_calls_query_failed", last_error_.c_str());
+        return false;
+    }
+
+    last_hfp_event_ = "calls_query_requested";
+    notifyBluetooth("hfp_calls_query_requested");
+    publishBleStatus();
+    return true;
+}
+
+bool BluetoothManager::syncPbapContacts() {
+    pbap_synced_ = false;
+    pbap_last_error_ = "pbap_not_available_on_esp32_arduino_bluedroid";
+    last_error_ = pbap_last_error_;
+    notifyBluetooth("pbap_sync_unsupported", pbap_last_error_.c_str());
+    publishBleStatus();
+    return false;
 }
 
 void BluetoothManager::setBleCommandHandler(std::function<String(const String&)> handler) {
@@ -393,6 +632,18 @@ bool BluetoothManager::isHfpActive() const {
 
 bool BluetoothManager::isBleActive() const {
     return ble_active_;
+}
+
+bool BluetoothManager::isDiscoverable() const {
+    return discoverable_;
+}
+
+bool BluetoothManager::isPbapSupported() const {
+    return pbap_supported_;
+}
+
+String BluetoothManager::callState() const {
+    return call_state_;
 }
 
 String BluetoothManager::peerMac() const {
@@ -446,7 +697,14 @@ bool BluetoothManager::ensureBtStackReady() {
     memcpy(pin_code, kLegacyPinCode, strlen(kLegacyPinCode));
     esp_bt_gap_set_pin(ESP_BT_PIN_TYPE_FIXED, 4, pin_code);
     // Keep classic BT connectable for outbound HFP while avoiding random inbound ACL grabs.
-    esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
+    const esp_err_t scan_err =
+        esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
+    if (scan_err != ESP_OK) {
+        last_error_ = "gap_scan_mode_failed:" + errToString(scan_err);
+        notifyBluetooth("stack_failed", last_error_.c_str());
+        return false;
+    }
+    discoverable_ = false;
 
     stack_ready_ = true;
     notifyBluetooth("stack_ready");
@@ -480,6 +738,26 @@ bool BluetoothManager::ensureHfpClientReady() {
 
     hfp_initialized_ = true;
     notifyBluetooth("hfp_ready");
+    return true;
+}
+
+bool BluetoothManager::requireCallControlReady(const char* operation) {
+    if (!features_.has_hfp) {
+        last_error_ = "hfp_not_supported";
+        notifyBluetooth("hfp_call_control_unavailable", last_error_.c_str());
+        return false;
+    }
+
+    if (!ensureHfpClientReady()) {
+        return false;
+    }
+
+    if (!connected_ || !slc_connected_) {
+        last_error_ = String(operation) + ":hfp_not_connected";
+        notifyBluetooth("hfp_call_control_unavailable", last_error_.c_str());
+        return false;
+    }
+
     return true;
 }
 
@@ -561,24 +839,29 @@ void BluetoothManager::handleHfpEvent(int event, const void* raw_param) {
                     case ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED:
                         connected_ = false;
                         hfp_active_ = false;
+                        slc_connected_ = false;
+                        call_state_ = "idle";
                         last_hfp_event_ = "disconnected";
                         notifyBluetooth("hfp_disconnected");
                         break;
                     case ESP_HF_CLIENT_CONNECTION_STATE_CONNECTING:
                         connected_ = false;
                         hfp_active_ = false;
+                        slc_connected_ = false;
                         last_hfp_event_ = "connecting";
                         notifyBluetooth("hfp_connecting");
                         break;
                     case ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED:
                         connected_ = true;
                         hfp_active_ = false;
+                        slc_connected_ = false;
                         last_hfp_event_ = "rfcomm_connected";
                         notifyBluetooth("hfp_rfcomm_connected");
                         break;
                     case ESP_HF_CLIENT_CONNECTION_STATE_SLC_CONNECTED:
                         connected_ = true;
                         hfp_active_ = true;
+                        slc_connected_ = true;
                         last_hfp_event_ = "slc_connected";
                         notifyBluetooth("hfp_slc_connected");
                         if (hfp_requested_ && peer_addr_valid_) {
@@ -586,6 +869,7 @@ void BluetoothManager::handleHfpEvent(int event, const void* raw_param) {
                         }
                         break;
                     case ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTING:
+                        slc_connected_ = false;
                         last_hfp_event_ = "disconnecting";
                         notifyBluetooth("hfp_disconnecting");
                         break;
@@ -620,8 +904,50 @@ void BluetoothManager::handleHfpEvent(int event, const void* raw_param) {
             }
             break;
         }
+        case ESP_HF_CLIENT_CIND_CALL_SETUP_EVT:
+            if (param != nullptr) {
+                call_state_ = callSetupStateToString(param->call_setup.status);
+            }
+            last_hfp_event_ = "call_setup";
+            notifyBluetooth("hfp_call_setup");
+            break;
+        case ESP_HF_CLIENT_CIND_CALL_EVT:
+            if (param != nullptr) {
+                if (param->call.status == ESP_HF_CALL_STATUS_CALL_IN_PROGRESS) {
+                    call_state_ = "active";
+                } else if (call_state_ == "ending" || call_state_ == "active" || call_state_ == "dialing" ||
+                           call_state_ == "alerting" || call_state_ == "ringing") {
+                    call_state_ = "idle";
+                }
+            }
+            last_hfp_event_ = "call_status";
+            notifyBluetooth("hfp_call_status");
+            break;
+        case ESP_HF_CLIENT_CIND_CALL_HELD_EVT:
+            if (param != nullptr) {
+                call_state_ = callHeldStateToString(param->call_held.status);
+            }
+            last_hfp_event_ = "call_held";
+            notifyBluetooth("hfp_call_held");
+            break;
+        case ESP_HF_CLIENT_CLCC_EVT:
+            if (param != nullptr) {
+                call_state_ = clccStateToString(param->clcc.status);
+                if (param->clcc.number != nullptr && strlen(param->clcc.number) > 0) {
+                    last_dialed_number_ = String(param->clcc.number);
+                }
+            }
+            last_hfp_event_ = "clcc";
+            notifyBluetooth("hfp_clcc");
+            break;
+        case ESP_HF_CLIENT_AT_RESPONSE_EVT:
+            if (param != nullptr && param->at_response.code != ESP_HF_AT_RESPONSE_CODE_OK) {
+                last_error_ = "hfp_at_response:" + String(atResponseCodeToString(param->at_response.code));
+            }
+            break;
         case ESP_HF_CLIENT_RING_IND_EVT:
             last_hfp_event_ = "ring";
+            call_state_ = "ringing";
             notifyBluetooth("hfp_ring");
             break;
         default:

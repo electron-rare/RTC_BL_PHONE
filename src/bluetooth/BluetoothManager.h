@@ -18,6 +18,13 @@ public:
     bool stopHFP();
     bool startBLE();
     bool stopBLE();
+    bool setDiscoverable(bool enabled);
+    bool dial(const String& number);
+    bool redial();
+    bool answerCall();
+    bool hangupCall();
+    bool queryCurrentCalls();
+    bool syncPbapContacts();
     void logStatus() const;
     void statusToJson(JsonObject obj) const;
     void setSecurity(bool enabled);
@@ -29,11 +36,15 @@ public:
     bool isSecurityEnabled() const;
     bool isHfpActive() const;
     bool isBleActive() const;
+    bool isDiscoverable() const;
+    bool isPbapSupported() const;
+    String callState() const;
     String peerMac() const;
 
 private:
     bool ensureBtStackReady();
     bool ensureHfpClientReady();
+    bool requireCallControlReady(const char* operation);
     bool parseMac(const String& mac, uint8_t out[6]) const;
     String formatMac(const uint8_t* mac) const;
 
@@ -46,11 +57,18 @@ private:
     bool ble_client_connected_;
     bool connected_;
     bool hfp_active_;
+    bool slc_connected_;
     bool ble_active_;
+    bool discoverable_;
     bool security_enabled_;
+    bool pbap_supported_;
+    bool pbap_synced_;
     String peer_mac_;
     uint8_t peer_addr_[6];
     bool peer_addr_valid_;
+    String call_state_;
+    String last_dialed_number_;
+    String pbap_last_error_;
     String last_hfp_event_;
     String last_ble_event_;
     String last_error_;

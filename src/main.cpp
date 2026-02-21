@@ -646,12 +646,58 @@ void registerCommands() {
         return makeResponse(ok, "BT_HFP_DISCONNECT");
     });
 
+    g_dispatcher.registerCommand("BT_DIAL", [](const String& args) {
+        String number = args;
+        number.trim();
+        if (number.isEmpty()) {
+            return makeResponse(false, "BT_DIAL invalid_number");
+        }
+        return makeResponse(g_bt.dial(number), "BT_DIAL");
+    });
+
+    g_dispatcher.registerCommand("DIAL", [](const String& args) {
+        String number = args;
+        number.trim();
+        if (number.isEmpty()) {
+            return makeResponse(false, "DIAL invalid_number");
+        }
+        return makeResponse(g_bt.dial(number), "DIAL");
+    });
+
+    g_dispatcher.registerCommand("BT_REDIAL", [](const String&) {
+        return makeResponse(g_bt.redial(), "BT_REDIAL");
+    });
+
+    g_dispatcher.registerCommand("BT_ANSWER", [](const String&) {
+        return makeResponse(g_bt.answerCall(), "BT_ANSWER");
+    });
+
+    g_dispatcher.registerCommand("BT_HANGUP", [](const String&) {
+        return makeResponse(g_bt.hangupCall(), "BT_HANGUP");
+    });
+
+    g_dispatcher.registerCommand("BT_CALLS", [](const String&) {
+        return makeResponse(g_bt.queryCurrentCalls(), "BT_CALLS");
+    });
+
+    g_dispatcher.registerCommand("BT_PBAP_SYNC", [](const String&) {
+        return makeResponse(g_bt.syncPbapContacts(), "BT_PBAP_SYNC unsupported");
+    });
+
     g_dispatcher.registerCommand("BT_BLE_START", [](const String&) {
         return makeResponse(g_bt.startBLE(), "BT_BLE_START");
     });
 
     g_dispatcher.registerCommand("BT_BLE_STOP", [](const String&) {
         return makeResponse(g_bt.stopBLE(), "BT_BLE_STOP");
+    });
+
+    g_dispatcher.registerCommand("BT_DISCOVERABLE_ON", [](const String&) {
+        return makeResponse(g_bt.setDiscoverable(true), "BT_DISCOVERABLE_ON");
+    });
+
+    g_dispatcher.registerCommand("BT_DISCOVERABLE_OFF", [](const String&) {
+        return makeResponse(g_bt.setDiscoverable(false), "BT_DISCOVERABLE_OFF");
     });
 
     g_dispatcher.registerCommand("BT_STATUS", [](const String&) {
