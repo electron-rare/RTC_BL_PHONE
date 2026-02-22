@@ -10,6 +10,8 @@ struct WifiStatusSnapshot {
     String ssid;
     String ip;
     int32_t rssi = 0;
+    int32_t channel = 0;
+    String bssid;
     String state;
     bool ap_active = false;
     String ap_ssid;

@@ -89,12 +89,21 @@ bool WifiManager::connect(const String& ssid, const String& password, uint32_t t
 
     stopFallbackAp();
     WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
     WiFi.disconnect(false, true);
     delay(100);
     WiFi.begin(ssid_.c_str(), password_.c_str());
 
     connected_ = waitForConnection(timeout_ms);
     if (connected_) {
+        const String link_bssid = WiFi.BSSIDstr();
+        const int32_t link_channel = static_cast<int32_t>(WiFi.channel());
+        Serial.printf("[WifiManager] STA connected: ssid=%s ip=%s rssi=%d ch=%ld bssid=%s\n",
+                      WiFi.SSID().c_str(),
+                      WiFi.localIP().toString().c_str(),
+                      static_cast<int>(WiFi.RSSI()),
+                      static_cast<long>(link_channel),
+                      link_bssid.c_str());
         if (persist) {
             WifiCredentialsStorage::save(ssid_, password_);
         }
@@ -178,6 +187,8 @@ WifiStatusSnapshot WifiManager::status() const {
     snap.ssid = connected ? WiFi.SSID() : ssid_;
     snap.ip = connected ? WiFi.localIP().toString() : String("0.0.0.0");
     snap.rssi = connected ? WiFi.RSSI() : 0;
+    snap.channel = connected ? static_cast<int32_t>(WiFi.channel()) : 0;
+    snap.bssid = connected ? WiFi.BSSIDstr() : String("");
     snap.ap_active = ap_active_;
     snap.ap_ssid = ap_active_ ? ap_ssid_ : String("");
     snap.ap_ip = ap_active_ ? WiFi.softAPIP().toString() : String("0.0.0.0");
@@ -199,6 +210,8 @@ void WifiManager::statusToJson(JsonObject obj) const {
     obj["ssid"] = snap.ssid;
     obj["ip"] = snap.ip;
     obj["rssi"] = snap.rssi;
+    obj["channel"] = snap.channel;
+    obj["bssid"] = snap.bssid;
     obj["state"] = snap.state;
     obj["ap_active"] = snap.ap_active;
     obj["ap_ssid"] = snap.ap_ssid;
