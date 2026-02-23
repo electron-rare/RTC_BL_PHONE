@@ -67,12 +67,15 @@ Réponse attendue:
 - `SC_EVENT`
 - `RING`
 - `SCENE <id>`
+  - `SCENE` retourne une erreur `missing_scene_id` si `id` absent
+  - `NEXT` retourne `scene_not_found` si aucune scène n’est active
 
 ## Erreurs connues
 
 - `unsupported_command`
 - `missing_scene_id`
 - `scene_not_found`
+- `WIFI_RECONNECT no_credentials`
 - erreurs réseau: `peer`, `payload` vide, trame > 240
 
 ## Limites runtime

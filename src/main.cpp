@@ -11,6 +11,7 @@
 #include "props/EspNowBridge.h"
 #include "slic/Ks0835SlicController.h"
 #include "telephony/TelephonyService.h"
+#include "wifi/WifiManagerInstance.h"
 
 #ifndef UNIT_TEST
 namespace {
@@ -26,6 +27,7 @@ FeatureMatrix g_features = getFeatureMatrix(BoardProfile::ESP32_A252);
 A252PinsConfig g_pins_cfg = A252ConfigStore::defaultPins();
 A252AudioConfig g_audio_cfg = A252ConfigStore::defaultAudio();
 EspNowPeerStore g_peer_store;
+String g_active_scene_id;
 
 Ks0835SlicController g_slic;
 AudioEngine g_audio;
@@ -261,6 +263,38 @@ bool isMacAddressString(const String& value) {
     return A252ConfigStore::parseMac(value, mac);
 }
 
+bool parseSceneIdFromArgs(const String& args, String& scene_id) {
+    scene_id = "";
+    String normalized = args;
+    normalized.trim();
+    if (normalized.isEmpty()) {
+        return false;
+    }
+
+    if (normalized[0] == '{') {
+        JsonDocument doc;
+        if (deserializeJson(doc, normalized) == DeserializationError::Ok && doc.is<JsonObject>()) {
+            scene_id = doc["id"] | "";
+            scene_id.trim();
+            return !scene_id.isEmpty();
+        }
+        return false;
+    }
+
+    if (normalized[0] == '"') {
+        if (normalized.length() >= 2U) {
+            scene_id = normalized.substring(1, normalized.length() - 1);
+            scene_id.trim();
+        }
+        return !scene_id.isEmpty();
+    }
+
+    String rest;
+    splitFirstToken(normalized, scene_id, rest);
+    scene_id.trim();
+    return !scene_id.isEmpty();
+}
+
 AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig& audio_cfg) {
     AudioConfig cfg;
     cfg.port = I2S_NUM_0;
@@ -344,6 +378,7 @@ void appendAudioMetrics(JsonObject root) {
 
 void fillStatusSnapshot(JsonObject root) {
     root["board_profile"] = boardProfileToString(g_profile);
+    root["active_scene"] = g_active_scene_id;
 
     JsonObject telephony = root["telephony"].to<JsonObject>();
     telephony["state"] = telephonyStateToString(g_telephony.state());
@@ -540,34 +575,49 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("WIFI_DISCONNECT", [](const String&) {
-        return makeResponse(false, "unsupported_command WIFI_DISCONNECT");
+        g_wifi.disconnect(false);
+        return makeResponse(true, "WIFI_DISCONNECT");
     });
 
     g_dispatcher.registerCommand("WIFI_RECONNECT", [](const String&) {
-        return makeResponse(false, "unsupported_command WIFI_RECONNECT");
+        const bool ok = g_wifi.reconnect();
+        return makeResponse(ok, ok ? "WIFI_RECONNECT" : "WIFI_RECONNECT no_credentials");
     });
 
     g_dispatcher.registerCommand("UNLOCK", [](const String&) {
-        return makeResponse(false, "unsupported_command UNLOCK");
+        g_slic.setLineEnabled(true);
+        return makeResponse(true, "UNLOCK");
     });
 
     g_dispatcher.registerCommand("NEXT", [](const String&) {
-        return makeResponse(false, "unsupported_command NEXT");
+        if (g_active_scene_id.isEmpty()) {
+            return makeResponse(false, "scene_not_found");
+        }
+        g_active_scene_id = "";
+        return makeResponse(true, "NEXT");
     });
 
     g_dispatcher.registerCommand("STORY_REFRESH_SD", [](const String&) {
-        return makeResponse(false, "unsupported_command STORY_REFRESH_SD");
+        return makeResponse(g_audio.isSdReady(), "STORY_REFRESH_SD");
     });
 
     g_dispatcher.registerCommand("SC_EVENT", [](const String&) {
-        return makeResponse(false, "unsupported_command SC_EVENT");
+        return makeResponse(true, "SC_EVENT");
     });
 
     g_dispatcher.registerCommand("SCENE", [](const String& args) {
-        if (args.isEmpty()) {
+        String scene_id;
+        if (!parseSceneIdFromArgs(args, scene_id)) {
             return makeResponse(false, "missing_scene_id");
         }
-        return makeResponse(false, "scene_not_found");
+        g_active_scene_id = scene_id;
+        JsonDocument out;
+        JsonObject root = out.to<JsonObject>();
+        root["ok"] = true;
+        root["code"] = "SCENE";
+        root["scene"] = scene_id;
+        root["active"] = true;
+        return jsonResponse(out);
     });
 
     g_dispatcher.registerCommand("CAPTURE_START", [](const String&) {

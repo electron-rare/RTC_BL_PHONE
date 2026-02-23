@@ -54,12 +54,16 @@ Le parseur accepte aussi:
 - `SCENE <id>`
   - exemples: `SCENE SCENE_WIN_ETAPE`
   - JSON: `{"cmd":"SCENE","args":{"id":"SCENE_WIN_ETAPE"}}`
+  - `SCENE` retourne les erreurs:
+    - `missing_scene_id` si `id` absent
+    - `scene_not_found` si aucune scène active pour un `NEXT`
 - Actions de contrôle (générique): `HW_*`, `AUDIO_*`, `MEDIA_*`, etc.
 
 ## Erreurs fréquentes
 - `unsupported_command`
 - `missing_scene_id`
 - `scene_not_found`
+- `WIFI_RECONNECT no_credentials` (pas de SSID/pw stocké)
 - erreurs réseau/connexion habituelles (`peer`, `payload` vide, trame > 240)
 
 ## Limites runtime
