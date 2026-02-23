@@ -32,7 +32,11 @@ DispatchResponse CommandDispatcher::dispatch(const String& line) const {
     if (it == handlers_.end()) {
         DispatchResponse resp;
         resp.ok = false;
-        resp.code = "UNKNOWN_COMMAND " + cmd;
+        resp.code = "unsupported_command";
+        if (!cmd.isEmpty()) {
+            resp.code += ' ';
+            resp.code += cmd;
+        }
         return resp;
     }
 

@@ -9,6 +9,9 @@
 EspNowBridge* EspNowBridge::instance_ = nullptr;
 
 namespace {
+constexpr size_t kEspNowMaxPayloadBytes = 240;
+constexpr size_t kEspNowMaxPeers = 16;
+
 void enforceEspNowCoexPolicy() {
     WiFi.setSleep(true);
     const esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
@@ -89,6 +92,12 @@ bool EspNowBridge::sendJson(const String& target, const String& json_payload) {
         return false;
     }
 
+    if (json_payload.length() > kEspNowMaxPayloadBytes) {
+        Serial.printf("[EspNowBridge] send rejected: payload too large=%u bytes\n",
+                      static_cast<unsigned>(json_payload.length()));
+        return false;
+    }
+
     if (target == "broadcast" || target == "BROADCAST") {
         const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
         return sendToMac(broadcast_mac, json_payload);
@@ -136,6 +145,11 @@ bool EspNowBridge::addPeerInternal(const String& mac, bool persist) {
 
     if (std::find(store_.peers.begin(), store_.peers.end(), normalized) != store_.peers.end()) {
         return true;
+    }
+
+    if (store_.peers.size() >= kEspNowMaxPeers) {
+        Serial.println("[EspNowBridge] peer rejected: max peers reached");
+        return false;
     }
 
     uint8_t peer_mac[6] = {0};
@@ -190,6 +204,11 @@ bool EspNowBridge::sendToMac(const uint8_t mac[6], const String& payload) {
         return false;
     }
 
+    if (payload.length() > kEspNowMaxPayloadBytes) {
+        tx_fail_++;
+        return false;
+    }
+
     const esp_err_t err = esp_now_send(mac, reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length());
     if (err != ESP_OK) {
         tx_fail_++;
@@ -213,6 +232,13 @@ void EspNowBridge::onDataRecv(const uint8_t* mac_addr, const uint8_t* data, int 
              mac_addr[3],
              mac_addr[4],
              mac_addr[5]);
+
+    if (len <= 0 || len > static_cast<int>(kEspNowMaxPayloadBytes)) {
+        Serial.printf("[EspNowBridge] rx dropped: invalid len=%d (max=%u)\n",
+                      len,
+                      static_cast<unsigned>(kEspNowMaxPayloadBytes));
+        return;
+    }
 
     String payload;
     payload.reserve(len + 1);

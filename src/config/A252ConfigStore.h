@@ -15,12 +15,13 @@ struct A252PinsConfig {
     int es8388_sda = 33;
     int es8388_scl = 32;
 
-    int slic_rm = 22;
-    int slic_fr = 19;
-    int slic_shk = 36;
+    // A252 bench defaults.
+    int slic_rm = 18;
+    int slic_fr = 5;
+    int slic_shk = 23;
     int slic_line = -1;
-    int slic_pd = 18;
-    bool hook_active_high = false;
+    int slic_pd = 19;
+    bool hook_active_high = true;
 };
 
 struct A252AudioConfig {

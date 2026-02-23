@@ -1,20 +1,16 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <esp_log.h>
+#include <WiFi.h>
 
 #include "audio/AudioEngine.h"
 #include "audio/Es8388Driver.h"
-#include "bluetooth/BluetoothManager.h"
 #include "config/A252ConfigStore.h"
 #include "core/CommandDispatcher.h"
 #include "core/PlatformProfile.h"
 #include "props/EspNowBridge.h"
-#include "props/PropsBridge.h"
 #include "slic/Ks0835SlicController.h"
 #include "telephony/TelephonyService.h"
-#include "web/WebServerManager.h"
-#include "wifi/WifiCredentialsStorage.h"
-#include "wifi/WifiManager.h"
 
 #ifndef UNIT_TEST
 namespace {
@@ -22,7 +18,6 @@ namespace {
 constexpr uint32_t kSerialBaud = 115200;
 constexpr int kAudioAmpEnablePin = 21;
 constexpr char kBootLogTag[] = "RTC_BOOT";
-constexpr uint32_t kBootWifiConnectTimeoutMs = 2500;
 constexpr bool kPrintHelpOnBoot = false;
 
 BoardProfile g_profile = BoardProfile::ESP32_A252;
@@ -30,18 +25,13 @@ FeatureMatrix g_features = getFeatureMatrix(BoardProfile::ESP32_A252);
 
 A252PinsConfig g_pins_cfg = A252ConfigStore::defaultPins();
 A252AudioConfig g_audio_cfg = A252ConfigStore::defaultAudio();
-MqttConfig g_mqtt_cfg = A252ConfigStore::defaultMqtt();
 EspNowPeerStore g_peer_store;
 
 Ks0835SlicController g_slic;
 AudioEngine g_audio;
 Es8388Driver g_codec;
 TelephonyService g_telephony;
-WifiManager g_wifi;
-PropsBridge g_mqtt;
 EspNowBridge g_espnow;
-BluetoothManager g_bt;
-WebServerManager g_web;
 CommandDispatcher g_dispatcher;
 String g_serial_line;
 
@@ -315,10 +305,12 @@ bool applyHardwareConfig() {
 
     g_telephony.begin(g_profile, g_slic, g_audio);
     g_telephony.setDialCallback([](const String& number) {
-        return g_bt.dial(number);
+        Serial.printf("[Telephony] dial request ignored (BT disabled): %s\n", number.c_str());
+        return false;
     });
     g_telephony.setAnswerCallback([]() {
-        return g_bt.answerCall();
+        Serial.println("[Telephony] answer request ignored (BT disabled)");
+        return false;
     });
 
     Serial.printf("[RTC_BL_PHONE] HW init slic=%s codec=%s audio=%s\n",
@@ -326,7 +318,7 @@ bool applyHardwareConfig() {
                   codec_ok ? "ok" : "fail",
                   audio_ok ? "ok" : "fail");
 
-    return slic_ok && audio_ok;
+    return slic_ok && codec_ok && audio_ok;
 }
 
 void appendAudioMetrics(JsonObject root) {
@@ -342,6 +334,8 @@ void appendAudioMetrics(JsonObject root) {
     JsonObject audio = root["audio"].to<JsonObject>();
     audio["full_duplex"] = g_audio.supportsFullDuplex();
     audio["dial_tone_active"] = g_audio.isDialToneActive();
+    audio["playing"] = g_audio.isPlaying();
+    audio["sd_ready"] = g_audio.isSdReady();
     audio["frames"] = metrics.frames_read;
     audio["underrun"] = metrics.underrun_count;
     audio["drop"] = metrics.drop_frames;
@@ -357,36 +351,15 @@ void fillStatusSnapshot(JsonObject root) {
 
     appendAudioMetrics(root);
 
-    JsonObject wifi = root["wifi"].to<JsonObject>();
-    g_wifi.statusToJson(wifi);
-
-    JsonObject mqtt = root["mqtt"].to<JsonObject>();
-    g_mqtt.statusToJson(mqtt);
-
     JsonObject espnow = root["espnow"].to<JsonObject>();
     g_espnow.statusToJson(espnow);
-
-    JsonObject bluetooth = root["bluetooth"].to<JsonObject>();
-    g_bt.statusToJson(bluetooth);
 
     JsonObject config = root["config"].to<JsonObject>();
     A252ConfigStore::pinsToJson(g_pins_cfg, config["pins"].to<JsonObject>());
     A252ConfigStore::audioToJson(g_audio_cfg, config["audio"].to<JsonObject>());
-    A252ConfigStore::mqttToJson(g_mqtt_cfg, config["mqtt"].to<JsonObject>(), false);
 
     JsonArray peers = config["espnow_peers"].to<JsonArray>();
     A252ConfigStore::peersToJson(g_peer_store, peers);
-}
-
-void publishStatusIfConnected() {
-    if (!g_mqtt.isConnected()) {
-        return;
-    }
-    JsonDocument doc;
-    fillStatusSnapshot(doc.to<JsonObject>());
-    String payload;
-    serializeJson(doc, payload);
-    g_mqtt.publish("status", payload, false);
 }
 
 bool applyPinsPatch(JsonVariantConst patch, A252PinsConfig& target, String& error) {
@@ -464,7 +437,6 @@ bool applyPinsPatch(JsonVariantConst patch, A252PinsConfig& target, String& erro
         next.hook_active_high = patch["hook_active_high"].as<bool>();
     }
 
-    // LINE enable logic is retired on A252 bench wiring.
     next.slic_line = -1;
 
     if (!A252ConfigStore::validatePins(next, error)) {
@@ -505,53 +477,8 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
     return true;
 }
 
-bool applyMqttPatch(JsonVariantConst patch, MqttConfig& target, String& error) {
-    MqttConfig next = target;
-
-    if (patch["enabled"].is<bool>()) {
-        next.enabled = patch["enabled"].as<bool>();
-    }
-    if (patch["host"].is<const char*>()) {
-        next.host = patch["host"].as<const char*>();
-    }
-    if (patch["port"].is<uint16_t>()) {
-        next.port = patch["port"].as<uint16_t>();
-    }
-    if (patch["user"].is<const char*>()) {
-        next.user = patch["user"].as<const char*>();
-    }
-    if (patch["pass"].is<const char*>()) {
-        next.pass = patch["pass"].as<const char*>();
-    }
-    if (patch["base_topic"].is<const char*>()) {
-        next.base_topic = patch["base_topic"].as<const char*>();
-    }
-
-    if (!A252ConfigStore::validateMqtt(next, error)) {
-        return false;
-    }
-
-    target = next;
-    return true;
-}
-
 DispatchResponse executeCommandLine(const String& line) {
     return g_dispatcher.dispatch(line);
-}
-
-String responseToText(const DispatchResponse& res) {
-    if (!res.raw.isEmpty()) {
-        return res.raw;
-    }
-    if (!res.json.isEmpty()) {
-        return res.json;
-    }
-    String out = res.ok ? "OK" : "ERR";
-    if (!res.code.isEmpty()) {
-        out += " ";
-        out += res.code;
-    }
-    return out;
 }
 
 void registerCommands() {
@@ -578,6 +505,69 @@ void registerCommands() {
     g_dispatcher.registerCommand("CALL", [](const String&) {
         g_telephony.triggerIncomingRing();
         return makeResponse(true, "CALL");
+    });
+
+    g_dispatcher.registerCommand("RING", [](const String&) {
+        g_telephony.triggerIncomingRing();
+        return makeResponse(true, "RING");
+    });
+
+    g_dispatcher.registerCommand("WIFI_STATUS", [](const String&) {
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        const wl_status_t status = WiFi.status();
+        const bool connected = status == WL_CONNECTED;
+
+        root["connected"] = connected;
+        root["status"] = status;
+        if (connected) {
+            root["ip"] = WiFi.localIP().toString();
+            root["rssi"] = WiFi.RSSI();
+            root["channel"] = WiFi.channel();
+        } else {
+            root["ip"] = "";
+            root["rssi"] = 0;
+            root["channel"] = 0;
+        }
+        root["mode"] = WiFi.getMode() == WIFI_MODE_STA
+                           ? "STA"
+                           : WiFi.getMode() == WIFI_MODE_AP
+                                 ? "AP"
+                                 : WiFi.getMode() == WIFI_MODE_APSTA
+                                       ? "APSTA"
+                                       : "NULL";
+        return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("WIFI_DISCONNECT", [](const String&) {
+        return makeResponse(false, "unsupported_command WIFI_DISCONNECT");
+    });
+
+    g_dispatcher.registerCommand("WIFI_RECONNECT", [](const String&) {
+        return makeResponse(false, "unsupported_command WIFI_RECONNECT");
+    });
+
+    g_dispatcher.registerCommand("UNLOCK", [](const String&) {
+        return makeResponse(false, "unsupported_command UNLOCK");
+    });
+
+    g_dispatcher.registerCommand("NEXT", [](const String&) {
+        return makeResponse(false, "unsupported_command NEXT");
+    });
+
+    g_dispatcher.registerCommand("STORY_REFRESH_SD", [](const String&) {
+        return makeResponse(false, "unsupported_command STORY_REFRESH_SD");
+    });
+
+    g_dispatcher.registerCommand("SC_EVENT", [](const String&) {
+        return makeResponse(false, "unsupported_command SC_EVENT");
+    });
+
+    g_dispatcher.registerCommand("SCENE", [](const String& args) {
+        if (args.isEmpty()) {
+            return makeResponse(false, "missing_scene_id");
+        }
+        return makeResponse(false, "scene_not_found");
     });
 
     g_dispatcher.registerCommand("CAPTURE_START", [](const String&) {
@@ -609,7 +599,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("AMP_ON", [](const String&) {
-        // Locked polarity: AMP_EN active LOW on GPIO21.
+        // Locked polarity for A252 bench: AMP_EN active LOW on GPIO21.
         digitalWrite(kAudioAmpEnablePin, LOW);
         return makeResponse(true, "AMP_ON");
     });
@@ -617,108 +607,6 @@ void registerCommands() {
     g_dispatcher.registerCommand("AMP_OFF", [](const String&) {
         digitalWrite(kAudioAmpEnablePin, HIGH);
         return makeResponse(true, "AMP_OFF");
-    });
-
-    g_dispatcher.registerCommand("WIFI_CONNECT", [](const String& args) {
-        String ssid;
-        String password_raw;
-        if (!splitFirstToken(args, ssid, password_raw) || ssid.isEmpty()) {
-            return makeResponse(false, "WIFI_CONNECT invalid_args");
-        }
-
-        String password = password_raw;
-        if (!password_raw.isEmpty()) {
-            String parsed;
-            String remaining;
-            if (splitFirstToken(password_raw, parsed, remaining) && remaining.isEmpty()) {
-                password = parsed;
-            }
-        }
-
-        const bool ok = g_wifi.connect(ssid, password, 10000, true);
-        return makeResponse(ok, "WIFI_CONNECT");
-    });
-
-    g_dispatcher.registerCommand("WIFI_DISCONNECT", [](const String&) {
-        g_wifi.disconnect(false);
-        return makeResponse(true, "WIFI_DISCONNECT");
-    });
-
-    g_dispatcher.registerCommand("WIFI_STATUS", [](const String&) {
-        JsonDocument doc;
-        g_wifi.statusToJson(doc.to<JsonObject>());
-        return jsonResponse(doc);
-    });
-
-    g_dispatcher.registerCommand("WIFI_SCAN", [](const String&) {
-        // Guard BT/HFP reconnect while WiFi allocates scan resources.
-        g_bt.suspendReconnect(8000U);
-        JsonDocument doc;
-        JsonObject root = doc.to<JsonObject>();
-        root["ok"] = true;
-        JsonArray nets = root["networks"].to<JsonArray>();
-        g_wifi.scanToJson(nets);
-        return jsonResponse(doc);
-    });
-
-    g_dispatcher.registerCommand("WIFI_RECONNECT", [](const String&) {
-        return makeResponse(g_wifi.reconnect(10000), "WIFI_RECONNECT");
-    });
-
-    g_dispatcher.registerCommand("MQTT_CONFIG_SET", [](const String& args) {
-        if (args.isEmpty()) {
-            return makeResponse(false, "MQTT_CONFIG_SET invalid_json");
-        }
-        JsonDocument doc;
-        if (deserializeJson(doc, args) != DeserializationError::Ok) {
-            return makeResponse(false, "MQTT_CONFIG_SET invalid_json");
-        }
-
-        MqttConfig next = g_mqtt_cfg;
-        String error;
-        if (!applyMqttPatch(doc.as<JsonVariantConst>(), next, error)) {
-            return makeResponse(false, "MQTT_CONFIG_SET " + error);
-        }
-        if (!A252ConfigStore::saveMqtt(next, &error)) {
-            return makeResponse(false, "MQTT_CONFIG_SET " + error);
-        }
-
-        g_mqtt_cfg = next;
-        g_mqtt.setConfig(g_mqtt_cfg);
-
-        JsonDocument out;
-        A252ConfigStore::mqttToJson(g_mqtt_cfg, out.to<JsonObject>(), false);
-        return jsonResponse(out);
-    });
-
-    g_dispatcher.registerCommand("MQTT_CONNECT", [](const String&) {
-        if (!g_mqtt_cfg.enabled) {
-            return makeResponse(false, "MQTT_CONNECT disabled");
-        }
-        return makeResponse(g_mqtt.connectNow(), "MQTT_CONNECT");
-    });
-
-    g_dispatcher.registerCommand("MQTT_DISCONNECT", [](const String&) {
-        g_mqtt.disconnect();
-        return makeResponse(true, "MQTT_DISCONNECT");
-    });
-
-    g_dispatcher.registerCommand("MQTT_STATUS", [](const String&) {
-        JsonDocument doc;
-        JsonObject root = doc.to<JsonObject>();
-        g_mqtt.statusToJson(root);
-        A252ConfigStore::mqttToJson(g_mqtt_cfg, root["config"].to<JsonObject>(), false);
-        return jsonResponse(doc);
-    });
-
-    g_dispatcher.registerCommand("MQTT_PUB", [](const String& args) {
-        String topic;
-        String payload;
-        if (!splitFirstToken(args, topic, payload) || topic.isEmpty()) {
-            return makeResponse(false, "MQTT_PUB invalid_args");
-        }
-        const bool ok = g_mqtt.publishRaw(topic, payload, false);
-        return makeResponse(ok, "MQTT_PUB");
     });
 
     g_dispatcher.registerCommand("ESPNOW_ON", [](const String&) {
@@ -775,88 +663,6 @@ void registerCommands() {
             return makeResponse(false, "ESPNOW_SEND invalid_args");
         }
         return makeResponse(g_espnow.sendJson(target, payload), "ESPNOW_SEND");
-    });
-
-    g_dispatcher.registerCommand("BT_HFP_CONNECT", [](const String& args) {
-        if (args.isEmpty()) {
-            return makeResponse(false, "BT_HFP_CONNECT invalid_addr");
-        }
-        const bool ok = g_bt.connect(args.c_str()) && g_bt.startHFP();
-        return makeResponse(ok, "BT_HFP_CONNECT");
-    });
-
-    g_dispatcher.registerCommand("BT_HFP_DISCONNECT", [](const String&) {
-        g_bt.stopHFP();
-        const bool ok = g_bt.disconnect();
-        return makeResponse(ok, "BT_HFP_DISCONNECT");
-    });
-
-    g_dispatcher.registerCommand("BT_DIAL", [](const String& args) {
-        String number = args;
-        number.trim();
-        if (number.isEmpty()) {
-            return makeResponse(false, "BT_DIAL invalid_number");
-        }
-        return makeResponse(g_bt.dial(number), "BT_DIAL");
-    });
-
-    g_dispatcher.registerCommand("DIAL", [](const String& args) {
-        String number = args;
-        number.trim();
-        if (number.isEmpty()) {
-            return makeResponse(false, "DIAL invalid_number");
-        }
-        return makeResponse(g_bt.dial(number), "DIAL");
-    });
-
-    g_dispatcher.registerCommand("BT_REDIAL", [](const String&) {
-        return makeResponse(g_bt.redial(), "BT_REDIAL");
-    });
-
-    g_dispatcher.registerCommand("BT_ANSWER", [](const String&) {
-        return makeResponse(g_bt.answerCall(), "BT_ANSWER");
-    });
-
-    g_dispatcher.registerCommand("BT_HANGUP", [](const String&) {
-        return makeResponse(g_bt.hangupCall(), "BT_HANGUP");
-    });
-
-    g_dispatcher.registerCommand("BT_CALLS", [](const String&) {
-        return makeResponse(g_bt.queryCurrentCalls(), "BT_CALLS");
-    });
-
-    g_dispatcher.registerCommand("BT_PBAP_SYNC", [](const String&) {
-        return makeResponse(g_bt.syncPbapContacts(), "BT_PBAP_SYNC unsupported");
-    });
-
-    g_dispatcher.registerCommand("BT_BLE_START", [](const String&) {
-        return makeResponse(g_bt.startBLE(), "BT_BLE_START");
-    });
-
-    g_dispatcher.registerCommand("BT_BLE_STOP", [](const String&) {
-        return makeResponse(g_bt.stopBLE(), "BT_BLE_STOP");
-    });
-
-    g_dispatcher.registerCommand("BT_DISCOVERABLE_ON", [](const String&) {
-        return makeResponse(g_bt.setDiscoverable(true), "BT_DISCOVERABLE_ON");
-    });
-
-    g_dispatcher.registerCommand("BT_DISCOVERABLE_OFF", [](const String&) {
-        return makeResponse(g_bt.setDiscoverable(false), "BT_DISCOVERABLE_OFF");
-    });
-
-    g_dispatcher.registerCommand("BT_AUTO_RECONNECT_ON", [](const String&) {
-        return makeResponse(g_bt.setAutoReconnectEnabled(true), "BT_AUTO_RECONNECT_ON");
-    });
-
-    g_dispatcher.registerCommand("BT_AUTO_RECONNECT_OFF", [](const String&) {
-        return makeResponse(g_bt.setAutoReconnectEnabled(false), "BT_AUTO_RECONNECT_OFF");
-    });
-
-    g_dispatcher.registerCommand("BT_STATUS", [](const String&) {
-        JsonDocument doc;
-        g_bt.statusToJson(doc.to<JsonObject>());
-        return jsonResponse(doc);
     });
 
     g_dispatcher.registerCommand("SLIC_CONFIG_GET", [](const String&) {
@@ -947,15 +753,6 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
     }
 
     const DispatchResponse result = executeCommandLine(cmd);
-
-    JsonDocument event;
-    event["source"] = source;
-    event["cmd"] = cmd;
-    event["ok"] = result.ok;
-    event["code"] = result.code;
-    String payload_json;
-    serializeJson(event, payload_json);
-    g_mqtt.publish("event", payload_json, false);
 
     if (is_envelope_v2 && request_ack && isMacAddressString(source)) {
         JsonDocument response;
@@ -1067,76 +864,32 @@ void setup() {
     g_features = getFeatureMatrix(g_profile);
 
     A252ConfigStore::loadPins(g_pins_cfg);
-    // Hard-wired SLIC mapping for live bench tests.
-    g_pins_cfg.slic_rm = 18;
-    g_pins_cfg.slic_fr = 5;
-    g_pins_cfg.slic_shk = 23;
-    // LINE enable is not used on this wiring.
     g_pins_cfg.slic_line = -1;
-    g_pins_cfg.slic_pd = 19;
-    g_pins_cfg.hook_active_high = true;
+    A252ConfigStore::loadAudio(g_audio_cfg);
+    A252ConfigStore::loadEspNowPeers(g_peer_store);
 
     pinMode(kAudioAmpEnablePin, OUTPUT);
     digitalWrite(kAudioAmpEnablePin, LOW);
-    A252ConfigStore::loadAudio(g_audio_cfg);
-    A252ConfigStore::loadMqtt(g_mqtt_cfg);
-    A252ConfigStore::loadEspNowPeers(g_peer_store);
 
     applyHardwareConfig();
     registerCommands();
-
-    g_bt.setBleCommandHandler([](const String& cmd) {
-        return responseToText(executeCommandLine(cmd));
-    });
-    g_bt.setAudioBridge(&g_audio);
-
-    g_mqtt.begin(g_mqtt_cfg);
-    g_mqtt.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
-        processInboundBridgeCommand(source, payload);
-    });
-
-    String ssid;
-    String password;
-    if (WifiCredentialsStorage::load(ssid, password)) {
-        g_wifi.connect(ssid, password, kBootWifiConnectTimeoutMs, false);
-        if (g_wifi.isConnected() && g_mqtt_cfg.enabled) {
-            g_mqtt.connectNow();
-        }
-    } else {
-        g_wifi.ensureFallbackAp();
-    }
 
     g_espnow.begin(g_peer_store);
     g_espnow.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
         processInboundBridgeCommand(source, payload);
     });
 
-    g_bt.begin(g_profile);
-
-    g_web.setRateLimitMs(250);
-    g_web.setAuthEnabled(false);
-    g_web.setStatusCallback(fillStatusSnapshot);
-    g_web.setCommandExecutor(executeCommandLine);
-    g_web.begin();
-
-    Serial.printf("[RTC_BL_PHONE] Boot: profile=%s bt_classic=%s full_duplex=%s\n",
+    Serial.printf("[RTC_BL_PHONE] Boot: profile=%s full_duplex=%s\n",
                   boardProfileToString(g_profile),
-                  g_features.has_bt_classic ? "true" : "false",
                   g_features.has_full_duplex_i2s ? "true" : "false");
     if (kPrintHelpOnBoot) {
         printHelp();
     }
-    publishStatusIfConnected();
 }
 
 void loop() {
-    g_telephony.setIncomingRing(g_bt.callState() == "ringing");
     g_telephony.tick();
-    g_wifi.loop();
-    g_bt.tick();
-    g_mqtt.tick();
     g_espnow.tick();
-    g_web.handle();
     pollSerial();
     delay(1);
 }

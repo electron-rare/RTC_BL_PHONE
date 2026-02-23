@@ -2,6 +2,7 @@
 #define AUDIO_ENGINE_H
 
 #include <Arduino.h>
+#include <AudioTools.h>
 #include <FS.h>
 #include <driver/i2s.h>
 #include <freertos/FreeRTOS.h>
@@ -60,22 +61,23 @@ public:
     virtual bool isDialToneActive() const;
     virtual bool supportsFullDuplex() const;
     virtual bool isPlaying() const;
+    virtual bool isSdReady() const;
     virtual AudioRuntimeMetrics metrics() const;
     virtual void resetMetrics();
     virtual void tick();
     const AudioConfig& config() const;
 
 private:
+    static size_t activeChannelCount(i2s_channel_fmt_t channel_format);
     static void audioTaskFn(void* arg);
     void startTask();
     void stopTask();
     bool lockI2s() const;
     void unlockI2s() const;
-    bool ensureDialToneWav();
-    bool ensureSpiffsMounted();
-    bool generateDialToneWav(const char* path);
-    bool openDialToneWav();
-    void closeDialToneWav();
+    bool ensureSdMounted();
+    void stopPlaybackFile();
+    bool prepareWavPlayback(File& file, const char* path);
+    bool streamPlaybackChunk();
 
     bool driver_installed_ = false;
     bool capture_active_ = false;
@@ -86,22 +88,23 @@ private:
     float dial_tone_gain_ = 0.0f;
     float dial_tone_phase_ = 0.0f;
     uint32_t next_dial_tone_push_ms_ = 0;
-    uint32_t play_until_ms_ = 0;
+    bool sd_mount_attempted_ = false;
+    bool sd_ready_ = false;
+    File playback_file_;
+    String playback_path_;
+    uint32_t playback_data_remaining_ = 0;
+    uint16_t playback_input_channels_ = 0;
     AudioConfig _config;
     FeatureMatrix features_;
     AudioRuntimeMetrics metrics_;
-    i2s_config_t _i2s_config{};
-    i2s_pin_config_t _i2s_pins{};
+    audio_tools::I2SStream i2s_stream_;
+    audio_tools::WAVDecoder wav_decoder_;
+    audio_tools::EncodedAudioStream wav_stream_;
+    audio_tools::StreamCopy wav_copy_;
     mutable SemaphoreHandle_t i2s_io_mutex_ = nullptr;
     TaskHandle_t task_handle_ = nullptr;
     static constexpr uint16_t kAudioTaskStackWords = 4096;
     static constexpr uint8_t kAudioTaskPriority = 5;
-    bool spiffs_mount_attempted_ = false;
-    bool spiffs_ready_ = false;
-    bool dial_tone_wav_ready_ = false;
-    String dial_tone_wav_path_;
-    File dial_tone_file_;
-    uint32_t dial_tone_wav_data_offset_ = 44;
     portMUX_TYPE capture_lock_ = portMUX_INITIALIZER_UNLOCKED;
 };
 

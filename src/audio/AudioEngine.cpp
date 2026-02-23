@@ -1,6 +1,6 @@
 #include "audio/AudioEngine.h"
 
-#include <SPIFFS.h>
+#include <SD_MMC.h>
 
 #include <algorithm>
 #include <cmath>
@@ -14,16 +14,13 @@ constexpr float kTwoPi = 6.28318530718f;
 constexpr int16_t kDialToneAmplitude = 32000;
 constexpr float kDialToneLinearGain = 1.14f;
 constexpr size_t kDialToneChunkFrames = 160;
-constexpr size_t kStereoChannels = 2;
+constexpr size_t kMaxChannels = 2;
 constexpr float kDialToneAttackMs = 25.0f;
 constexpr float kDialToneReleaseMs = 40.0f;
-constexpr uint32_t kDialToneWavSeconds = 1;
-constexpr char kDialToneWavPrefix[] = "/dialtone_425_";
-constexpr bool kDialToneUseWav = false;
-constexpr TickType_t kI2sWriteTimeoutTicks = pdMS_TO_TICKS(2);
-}
+constexpr TickType_t kI2sWriteTimeoutMs = 2;
+constexpr TickType_t kI2sReadTimeoutMs = 2;
+constexpr size_t kPlaybackCopyBytes = 1024;
 
-namespace {
 int16_t clampInt16(float value) {
     if (value > static_cast<float>(std::numeric_limits<int16_t>::max())) {
         return std::numeric_limits<int16_t>::max();
@@ -32,6 +29,18 @@ int16_t clampInt16(float value) {
         return std::numeric_limits<int16_t>::min();
     }
     return static_cast<int16_t>(value);
+}
+
+int bitsPerSampleToInt(i2s_bits_per_sample_t bits) {
+    switch (bits) {
+        case I2S_BITS_PER_SAMPLE_24BIT:
+            return 24;
+        case I2S_BITS_PER_SAMPLE_32BIT:
+            return 32;
+        case I2S_BITS_PER_SAMPLE_16BIT:
+        default:
+            return 16;
+    }
 }
 }  // namespace
 
@@ -61,11 +70,28 @@ AudioEngine::AudioEngine()
       capture_active_(false),
       capture_clients_mask_(0),
       playing_(false),
-      play_until_ms_(0),
-      features_(getFeatureMatrix(detectBoardProfile())) {}
+      features_(getFeatureMatrix(detectBoardProfile())) {
+    wav_stream_.setOutput(i2s_stream_);
+    wav_stream_.setDecoder(&wav_decoder_);
+    wav_copy_.setCheckAvailable(false);
+    wav_copy_.setCheckAvailableForWrite(false);
+    wav_copy_.setMinCopySize(sizeof(int16_t));
+    wav_copy_.setRetry(2);
+    wav_copy_.setRetryDelay(2);
+}
 
 AudioEngine::~AudioEngine() {
     end();
+}
+
+size_t AudioEngine::activeChannelCount(i2s_channel_fmt_t channel_format) {
+    switch (channel_format) {
+        case I2S_CHANNEL_FMT_ONLY_LEFT:
+        case I2S_CHANNEL_FMT_ONLY_RIGHT:
+            return 1;
+        default:
+            return 2;
+    }
 }
 
 bool AudioEngine::lockI2s() const {
@@ -81,45 +107,69 @@ void AudioEngine::unlockI2s() const {
     }
 }
 
+bool AudioEngine::ensureSdMounted() {
+    if (sd_mount_attempted_) {
+        return sd_ready_;
+    }
+
+    sd_mount_attempted_ = true;
+    sd_ready_ = SD_MMC.begin();
+    if (!sd_ready_) {
+        Serial.println("[AudioEngine] SD_MMC mount failed");
+    }
+    return sd_ready_;
+}
+
+void AudioEngine::stopPlaybackFile() {
+    wav_copy_.end();
+    wav_stream_.end();
+    if (playback_file_) {
+        playback_file_.close();
+    }
+    playback_path_ = "";
+    playback_data_remaining_ = 0;
+    playback_input_channels_ = 0;
+    playing_ = false;
+}
+
+bool AudioEngine::prepareWavPlayback(File& file, const char* path) {
+    (void)path;
+    if (!file) {
+        return false;
+    }
+    // WAV parsing/format conversion is delegated to audio-tools WAVDecoder.
+    return true;
+}
+
 bool AudioEngine::begin(const AudioConfig& config) {
     end();
     _config = config;
 
-    const i2s_mode_t mode = static_cast<i2s_mode_t>(
-        I2S_MODE_MASTER | I2S_MODE_TX |
-        ((_config.enable_capture && features_.has_full_duplex_i2s) ? I2S_MODE_RX : 0));
+    const bool full_duplex = (_config.enable_capture && features_.has_full_duplex_i2s);
+    const audio_tools::RxTxMode mode = full_duplex ? audio_tools::RXTX_MODE : audio_tools::TX_MODE;
+    auto i2s_cfg = i2s_stream_.defaultConfig(mode);
+    i2s_cfg.port_no = static_cast<int>(_config.port);
+    i2s_cfg.sample_rate = _config.sample_rate;
+    i2s_cfg.bits_per_sample = bitsPerSampleToInt(_config.bits_per_sample);
+    i2s_cfg.channels = static_cast<int>(activeChannelCount(_config.channel_format));
+    i2s_cfg.channel_format = _config.channel_format;
+    i2s_cfg.pin_bck = _config.bck_pin;
+    i2s_cfg.pin_ws = _config.ws_pin;
+    i2s_cfg.pin_data = _config.data_out_pin;
+    i2s_cfg.pin_data_rx = _config.data_in_pin;
+    i2s_cfg.buffer_count = _config.dma_buf_count;
+    i2s_cfg.buffer_size = _config.dma_buf_len;
+    i2s_cfg.auto_clear = true;
 
-    _i2s_config = {
-        .mode = mode,
-        .sample_rate = _config.sample_rate,
-        .bits_per_sample = _config.bits_per_sample,
-        .channel_format = _config.channel_format,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags = 0,
-        .dma_buf_count = _config.dma_buf_count,
-        .dma_buf_len = _config.dma_buf_len,
-        .use_apll = false,
-        .tx_desc_auto_clear = true,
-        .fixed_mclk = 0,
-    };
-
-    _i2s_pins = {
-        .bck_io_num = _config.bck_pin,
-        .ws_io_num = _config.ws_pin,
-        .data_out_num = _config.data_out_pin,
-        .data_in_num = _config.data_in_pin,
-    };
-
-    if (i2s_driver_install(_config.port, &_i2s_config, 0, nullptr) != ESP_OK) {
-        Serial.println("[AudioEngine] i2s_driver_install failed");
+    if (!i2s_stream_.begin(i2s_cfg)) {
+        Serial.println("[AudioEngine] i2s begin failed");
         driver_installed_ = false;
         return false;
     }
-    if (i2s_set_pin(_config.port, &_i2s_pins) != ESP_OK) {
-        Serial.println("[AudioEngine] i2s_set_pin failed");
-        i2s_driver_uninstall(_config.port);
-        driver_installed_ = false;
-        return false;
+
+    if (i2s_stream_.driver() != nullptr) {
+        i2s_stream_.driver()->setWaitTimeReadMs(kI2sReadTimeoutMs);
+        i2s_stream_.driver()->setWaitTimeWriteMs(kI2sWriteTimeoutMs);
     }
 
     if (i2s_io_mutex_ == nullptr) {
@@ -129,7 +179,6 @@ bool AudioEngine::begin(const AudioConfig& config) {
         }
     }
 
-    i2s_zero_dma_buffer(_config.port);
     driver_installed_ = true;
     portENTER_CRITICAL(&capture_lock_);
     capture_clients_mask_ = 0U;
@@ -141,12 +190,7 @@ bool AudioEngine::begin(const AudioConfig& config) {
     dial_tone_gain_ = 0.0f;
     dial_tone_phase_ = 0.0f;
     next_dial_tone_push_ms_ = 0;
-    closeDialToneWav();
-    dial_tone_wav_ready_ = false;
-    dial_tone_wav_path_ = String(kDialToneWavPrefix) + String(_config.sample_rate) + ".wav";
-    if (kDialToneUseWav) {
-        ensureDialToneWav();
-    }
+    stopPlaybackFile();
     startTask();
     Serial.printf("[AudioEngine] ready (full_duplex=%s)\n",
                   supportsFullDuplex() ? "true" : "false");
@@ -159,16 +203,16 @@ void AudioEngine::end() {
     }
     stopTask();
     stopDialTone();
+    stopPlaybackFile();
     portENTER_CRITICAL(&capture_lock_);
     capture_clients_mask_ = 0U;
     capture_active_ = false;
     portEXIT_CRITICAL(&capture_lock_);
-    closeDialToneWav();
     if (i2s_io_mutex_ != nullptr) {
         vSemaphoreDelete(i2s_io_mutex_);
         i2s_io_mutex_ = nullptr;
     }
-    i2s_driver_uninstall(_config.port);
+    i2s_stream_.end();
     driver_installed_ = false;
 }
 
@@ -222,10 +266,33 @@ bool AudioEngine::playFile(const char* path) {
     if (!driver_installed_ || path == nullptr || path[0] == '\0') {
         return false;
     }
-    // Firmware skeleton: this marks a playback window for telephony flow.
+    if (!ensureSdMounted()) {
+        return false;
+    }
+
+    stopDialTone();
+    stopPlaybackFile();
+
+    playback_file_ = SD_MMC.open(path, FILE_READ);
+    if (!playback_file_) {
+        Serial.printf("[AudioEngine] sd file not found: %s\n", path);
+        return false;
+    }
+
+    if (!prepareWavPlayback(playback_file_, path)) {
+        stopPlaybackFile();
+        return false;
+    }
+
+    if (!wav_stream_.begin()) {
+        stopPlaybackFile();
+        Serial.printf("[AudioEngine] wav decoder begin failed: %s\n", path);
+        return false;
+    }
+    wav_copy_.begin(wav_stream_, playback_file_);
+    playback_path_ = path;
     playing_ = true;
-    play_until_ms_ = millis() + 2500;
-    Serial.printf("[AudioEngine] play request: %s\n", path);
+    Serial.printf("[AudioEngine] play sd wav (audio-tools): %s\n", path);
     return true;
 }
 
@@ -274,8 +341,8 @@ size_t AudioEngine::readCaptureFrame(int16_t* dst, size_t samples) {
     metrics_.frames_requested += static_cast<uint32_t>(samples);
     const uint32_t start_ms = millis();
     const size_t byte_count = samples * sizeof(int16_t);
-    size_t bytes_read = 0;
-    if (i2s_read(_config.port, dst, byte_count, &bytes_read, 2) != ESP_OK || bytes_read == 0) {
+    size_t bytes_read = i2s_stream_.readBytes(reinterpret_cast<uint8_t*>(dst), byte_count);
+    if (bytes_read == 0) {
         std::memset(dst, 0, byte_count);
         metrics_.underrun_count++;
         metrics_.drop_frames += static_cast<uint32_t>(samples);
@@ -303,10 +370,19 @@ size_t AudioEngine::readCaptureFrameNonBlocking(int16_t* dst, size_t samples) {
         return 0;
     }
 
+    if (i2s_stream_.driver() != nullptr) {
+        i2s_stream_.driver()->setWaitTimeReadMs(0);
+    }
+
     metrics_.frames_requested += static_cast<uint32_t>(samples);
     const size_t byte_count = samples * sizeof(int16_t);
-    size_t bytes_read = 0;
-    if (i2s_read(_config.port, dst, byte_count, &bytes_read, 0) != ESP_OK || bytes_read == 0) {
+    const size_t bytes_read = i2s_stream_.readBytes(reinterpret_cast<uint8_t*>(dst), byte_count);
+
+    if (i2s_stream_.driver() != nullptr) {
+        i2s_stream_.driver()->setWaitTimeReadMs(kI2sReadTimeoutMs);
+    }
+
+    if (bytes_read == 0) {
         unlockI2s();
         return 0;
     }
@@ -329,11 +405,7 @@ size_t AudioEngine::writePlaybackFrame(const int16_t* src, size_t samples) {
     }
 
     const size_t byte_count = samples * sizeof(int16_t);
-    size_t bytes_written = 0;
-    if (i2s_write(_config.port, src, byte_count, &bytes_written, kI2sWriteTimeoutTicks) != ESP_OK) {
-        unlockI2s();
-        return 0;
-    }
+    const size_t bytes_written = i2s_stream_.write(reinterpret_cast<const uint8_t*>(src), byte_count);
     unlockI2s();
     return bytes_written / sizeof(int16_t);
 }
@@ -345,9 +417,6 @@ void AudioEngine::stopCapture() {
 bool AudioEngine::startDialTone() {
     if (!driver_installed_) {
         return false;
-    }
-    if (kDialToneUseWav) {
-        ensureDialToneWav();
     }
     const bool was_active = dial_tone_active_;
     dial_tone_active_ = true;
@@ -376,6 +445,10 @@ bool AudioEngine::isPlaying() const {
     return playing_;
 }
 
+bool AudioEngine::isSdReady() const {
+    return sd_ready_;
+}
+
 AudioRuntimeMetrics AudioEngine::metrics() const {
     return metrics_;
 }
@@ -384,13 +457,34 @@ void AudioEngine::resetMetrics() {
     metrics_ = AudioRuntimeMetrics{};
 }
 
-void AudioEngine::tick() {
-    if (playing_ && millis() >= play_until_ms_) {
-        playing_ = false;
+bool AudioEngine::streamPlaybackChunk() {
+    if (!playback_file_) {
+        stopPlaybackFile();
+        return false;
     }
 
-    if (!driver_installed_ || playing_) {
+    const size_t copied = wav_copy_.copyBytes(kPlaybackCopyBytes);
+    if (copied > 0U) {
+        return true;
+    }
+
+    if (!playback_file_.available()) {
+        stopPlaybackFile();
+        return false;
+    }
+
+    return true;
+}
+
+void AudioEngine::tick() {
+    if (!driver_installed_) {
         return;
+    }
+
+    if (playing_) {
+        if (streamPlaybackChunk()) {
+            return;
+        }
     }
 
     const bool tone_requested = dial_tone_active_;
@@ -404,27 +498,13 @@ void AudioEngine::tick() {
         return;
     }
 
-    int16_t frame[kDialToneChunkFrames * kStereoChannels] = {0};
-    const float phase_step = (kTwoPi * kDialToneHz) / static_cast<float>(_config.sample_rate);
-    const size_t chunk_samples = kDialToneChunkFrames * kStereoChannels;
-    const size_t chunk_bytes = chunk_samples * sizeof(int16_t);
-    uint8_t pcm_raw[kDialToneChunkFrames * kStereoChannels * sizeof(int16_t)] = {0};
-    bool wav_ready = false;
-    size_t wav_filled = 0;
-
-    if (kDialToneUseWav && ensureDialToneWav() && openDialToneWav()) {
-        while (wav_filled < chunk_bytes) {
-            const int got = dial_tone_file_.read(pcm_raw + wav_filled, chunk_bytes - wav_filled);
-            if (got > 0) {
-                wav_filled += static_cast<size_t>(got);
-                continue;
-            }
-            if (!dial_tone_file_.seek(dial_tone_wav_data_offset_)) {
-                break;
-            }
-        }
-        wav_ready = (wav_filled == chunk_bytes);
+    const size_t channels = activeChannelCount(_config.channel_format);
+    if (channels == 0U || channels > kMaxChannels) {
+        return;
     }
+
+    int16_t frame[kDialToneChunkFrames * kMaxChannels] = {0};
+    const float phase_step = (kTwoPi * kDialToneHz) / static_cast<float>(_config.sample_rate);
 
     const float attack_step =
         1.0f / std::max(1.0f, (static_cast<float>(_config.sample_rate) * (kDialToneAttackMs / 1000.0f)));
@@ -437,187 +517,30 @@ void AudioEngine::tick() {
             dial_tone_gain_ = std::max(0.0f, dial_tone_gain_ - release_step);
         }
 
-        int16_t sample_l = 0;
-        int16_t sample_r = 0;
-        if (wav_ready) {
-            const size_t l_idx = i * kStereoChannels;
-            const size_t r_idx = l_idx + 1;
-            const size_t l_byte = l_idx * sizeof(int16_t);
-            const size_t r_byte = r_idx * sizeof(int16_t);
-            sample_l = static_cast<int16_t>(
-                static_cast<uint16_t>(pcm_raw[l_byte]) |
-                static_cast<uint16_t>(static_cast<uint16_t>(pcm_raw[l_byte + 1]) << 8));
-            sample_r = static_cast<int16_t>(
-                static_cast<uint16_t>(pcm_raw[r_byte]) |
-                static_cast<uint16_t>(static_cast<uint16_t>(pcm_raw[r_byte + 1]) << 8));
-        } else {
-            const int16_t sample = static_cast<int16_t>(std::sin(dial_tone_phase_) * static_cast<float>(kDialToneAmplitude));
-            sample_l = sample;
-            sample_r = sample;
-            dial_tone_phase_ += phase_step;
-            if (dial_tone_phase_ >= kTwoPi) {
-                dial_tone_phase_ -= kTwoPi;
-            }
+        const int16_t sample = static_cast<int16_t>(std::sin(dial_tone_phase_) * static_cast<float>(kDialToneAmplitude));
+        dial_tone_phase_ += phase_step;
+        if (dial_tone_phase_ >= kTwoPi) {
+            dial_tone_phase_ -= kTwoPi;
         }
 
-        const float gain = dial_tone_gain_ * kDialToneLinearGain;
-        frame[(i * kStereoChannels)] = clampInt16(static_cast<float>(sample_l) * gain);
-        frame[(i * kStereoChannels) + 1] = clampInt16(static_cast<float>(sample_r) * gain);
+        const int16_t out = clampInt16(static_cast<float>(sample) * dial_tone_gain_ * kDialToneLinearGain);
+        for (size_t ch = 0; ch < channels; ++ch) {
+            frame[i * channels + ch] = out;
+        }
     }
 
-    const size_t requested_samples = kDialToneChunkFrames * kStereoChannels;
+    const size_t requested_samples = kDialToneChunkFrames * channels;
     const size_t written_samples = writePlaybackFrame(frame, requested_samples);
     if (written_samples == 0U) {
-        // Retry fast when TX queue/mutex was temporarily unavailable.
         next_dial_tone_push_ms_ = now + 1U;
         return;
     }
 
-    const size_t written_frames = written_samples / kStereoChannels;
+    const size_t written_frames = written_samples / channels;
     const uint32_t chunk_ms = static_cast<uint32_t>((1000U * written_frames) / _config.sample_rate);
     next_dial_tone_push_ms_ = now + (chunk_ms == 0U ? 1U : chunk_ms);
 }
 
 const AudioConfig& AudioEngine::config() const {
     return _config;
-}
-
-bool AudioEngine::ensureSpiffsMounted() {
-    if (spiffs_mount_attempted_) {
-        return spiffs_ready_;
-    }
-    spiffs_mount_attempted_ = true;
-    spiffs_ready_ = SPIFFS.begin(false);
-    if (!spiffs_ready_) {
-        Serial.println("[AudioEngine] SPIFFS not available (dial tone WAV fallback)");
-    }
-    return spiffs_ready_;
-}
-
-bool AudioEngine::generateDialToneWav(const char* path) {
-    if (path == nullptr || path[0] == '\0') {
-        return false;
-    }
-    if (!ensureSpiffsMounted()) {
-        return false;
-    }
-
-    SPIFFS.remove(path);
-    File file = SPIFFS.open(path, FILE_WRITE);
-    if (!file) {
-        Serial.printf("[AudioEngine] cannot create %s\n", path);
-        return false;
-    }
-
-    const uint16_t channels = static_cast<uint16_t>(kStereoChannels);
-    const uint16_t bits_per_sample = 16;
-    const uint32_t bytes_per_sample = bits_per_sample / 8U;
-    const uint32_t frames = _config.sample_rate * kDialToneWavSeconds;
-    const uint32_t data_bytes = frames * channels * bytes_per_sample;
-    const uint32_t riff_size = 36U + data_bytes;
-    const uint32_t byte_rate = _config.sample_rate * channels * bytes_per_sample;
-    const uint16_t block_align = static_cast<uint16_t>(channels * bytes_per_sample);
-
-    auto write_u16 = [&](uint16_t v) {
-        uint8_t b[2] = {static_cast<uint8_t>(v & 0xFFU), static_cast<uint8_t>((v >> 8) & 0xFFU)};
-        return file.write(b, sizeof(b)) == sizeof(b);
-    };
-    auto write_u32 = [&](uint32_t v) {
-        uint8_t b[4] = {static_cast<uint8_t>(v & 0xFFU), static_cast<uint8_t>((v >> 8) & 0xFFU),
-                        static_cast<uint8_t>((v >> 16) & 0xFFU), static_cast<uint8_t>((v >> 24) & 0xFFU)};
-        return file.write(b, sizeof(b)) == sizeof(b);
-    };
-
-    bool ok = true;
-    ok &= file.write(reinterpret_cast<const uint8_t*>("RIFF"), 4) == 4;
-    ok &= write_u32(riff_size);
-    ok &= file.write(reinterpret_cast<const uint8_t*>("WAVE"), 4) == 4;
-    ok &= file.write(reinterpret_cast<const uint8_t*>("fmt "), 4) == 4;
-    ok &= write_u32(16U);
-    ok &= write_u16(1U);
-    ok &= write_u16(channels);
-    ok &= write_u32(_config.sample_rate);
-    ok &= write_u32(byte_rate);
-    ok &= write_u16(block_align);
-    ok &= write_u16(bits_per_sample);
-    ok &= file.write(reinterpret_cast<const uint8_t*>("data"), 4) == 4;
-    ok &= write_u32(data_bytes);
-    if (!ok) {
-        file.close();
-        SPIFFS.remove(path);
-        return false;
-    }
-
-    int16_t pcm[kDialToneChunkFrames * kStereoChannels] = {0};
-    const float phase_step = (kTwoPi * kDialToneHz) / static_cast<float>(_config.sample_rate);
-    float phase = 0.0f;
-    uint32_t written_frames = 0;
-    while (written_frames < frames) {
-        const uint32_t remaining = frames - written_frames;
-        const uint32_t this_chunk = std::min<uint32_t>(static_cast<uint32_t>(kDialToneChunkFrames), remaining);
-        for (uint32_t i = 0; i < this_chunk; ++i) {
-            const int16_t s = static_cast<int16_t>(std::sin(phase) * static_cast<float>(kDialToneAmplitude));
-            pcm[(i * kStereoChannels)] = s;
-            pcm[(i * kStereoChannels) + 1] = s;
-            phase += phase_step;
-            if (phase >= kTwoPi) {
-                phase -= kTwoPi;
-            }
-        }
-        const size_t bytes = static_cast<size_t>(this_chunk * kStereoChannels * sizeof(int16_t));
-        if (file.write(reinterpret_cast<const uint8_t*>(pcm), bytes) != bytes) {
-            file.close();
-            SPIFFS.remove(path);
-            return false;
-        }
-        written_frames += this_chunk;
-    }
-
-    file.close();
-    return true;
-}
-
-bool AudioEngine::ensureDialToneWav() {
-    if (!dial_tone_wav_path_.isEmpty() && dial_tone_wav_ready_) {
-        return true;
-    }
-    if (dial_tone_wav_path_.isEmpty()) {
-        dial_tone_wav_path_ = String(kDialToneWavPrefix) + String(_config.sample_rate) + ".wav";
-    }
-    if (!ensureSpiffsMounted()) {
-        return false;
-    }
-    if (!SPIFFS.exists(dial_tone_wav_path_.c_str())) {
-        if (!generateDialToneWav(dial_tone_wav_path_.c_str())) {
-            return false;
-        }
-    }
-    dial_tone_wav_ready_ = SPIFFS.exists(dial_tone_wav_path_.c_str());
-    return dial_tone_wav_ready_;
-}
-
-bool AudioEngine::openDialToneWav() {
-    if (!dial_tone_wav_ready_) {
-        return false;
-    }
-    if (dial_tone_file_) {
-        return true;
-    }
-    dial_tone_file_ = SPIFFS.open(dial_tone_wav_path_.c_str(), FILE_READ);
-    if (!dial_tone_file_) {
-        dial_tone_wav_ready_ = false;
-        return false;
-    }
-    if (!dial_tone_file_.seek(dial_tone_wav_data_offset_)) {
-        dial_tone_file_.close();
-        dial_tone_wav_ready_ = false;
-        return false;
-    }
-    return true;
-}
-
-void AudioEngine::closeDialToneWav() {
-    if (dial_tone_file_) {
-        dial_tone_file_.close();
-    }
 }
