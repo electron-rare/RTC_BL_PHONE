@@ -14,6 +14,7 @@ Normaliser les trames ESP-NOW pour:
 
 ```json
 {
+  "proto": "rtcbl/1",
   "msg_id": "req-001",
   "seq": 1,
   "type": "command",
@@ -26,9 +27,10 @@ Normaliser les trames ESP-NOW pour:
 ```
 
 Règles:
+- `proto=rtcbl/1` recommandé (toléré absent pour compat).
 - `msg_id` sert à corréler la réponse.
 - `seq` est un compteur local de trame (recommandé monotone par source).
-- `type=command` déclenche l'exécution côté firmware.
+- `type=command|request|cmd` déclenche l'exécution côté firmware.
 - `ack=true` demande une réponse corrélée.
 - `payload.cmd` obligatoire pour une commande dispatcher.
 - `payload.args` optionnel; sérialisé puis passé au dispatcher.
@@ -37,6 +39,7 @@ Règles:
 
 ```json
 {
+  "proto": "rtcbl/1",
   "msg_id": "req-001",
   "seq": 1,
   "type": "ack",

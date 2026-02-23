@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <esp_log.h>
 
 #include "audio/AudioEngine.h"
 #include "audio/Es8388Driver.h"
@@ -19,6 +20,10 @@
 namespace {
 
 constexpr uint32_t kSerialBaud = 115200;
+constexpr int kAudioAmpEnablePin = 21;
+constexpr char kBootLogTag[] = "RTC_BOOT";
+constexpr uint32_t kBootWifiConnectTimeoutMs = 2500;
+constexpr bool kPrintHelpOnBoot = false;
 
 BoardProfile g_profile = BoardProfile::ESP32_A252;
 FeatureMatrix g_features = getFeatureMatrix(BoardProfile::ESP32_A252);
@@ -290,14 +295,13 @@ bool applyHardwareConfig() {
         .pin_rm = static_cast<uint8_t>(g_pins_cfg.slic_rm),
         .pin_fr = static_cast<uint8_t>(g_pins_cfg.slic_fr),
         .pin_shk = static_cast<uint8_t>(g_pins_cfg.slic_shk),
-        .pin_line_enable = static_cast<int8_t>(g_pins_cfg.slic_line),
+        .pin_line_enable = static_cast<int8_t>(-1),
         .pin_pd = static_cast<int8_t>(g_pins_cfg.slic_pd),
         .hook_active_high = g_pins_cfg.hook_active_high,
     };
 
     const bool slic_ok = g_slic.begin(slic_pins);
     g_slic.setPowerDown(false);
-    g_slic.setLineEnabled(true);
     g_slic.setRing(false);
 
     const bool codec_ok = g_codec.begin(g_pins_cfg.es8388_sda, g_pins_cfg.es8388_scl);
@@ -310,6 +314,12 @@ bool applyHardwareConfig() {
     g_audio.resetMetrics();
 
     g_telephony.begin(g_profile, g_slic, g_audio);
+    g_telephony.setDialCallback([](const String& number) {
+        return g_bt.dial(number);
+    });
+    g_telephony.setAnswerCallback([]() {
+        return g_bt.answerCall();
+    });
 
     Serial.printf("[RTC_BL_PHONE] HW init slic=%s codec=%s audio=%s\n",
                   slic_ok ? "ok" : "fail",
@@ -331,6 +341,7 @@ void appendAudioMetrics(JsonObject root) {
 
     JsonObject audio = root["audio"].to<JsonObject>();
     audio["full_duplex"] = g_audio.supportsFullDuplex();
+    audio["dial_tone_active"] = g_audio.isDialToneActive();
     audio["frames"] = metrics.frames_read;
     audio["underrun"] = metrics.underrun_count;
     audio["drop"] = metrics.drop_frames;
@@ -410,9 +421,6 @@ bool applyPinsPatch(JsonVariantConst patch, A252PinsConfig& target, String& erro
     if (patch["slic"]["shk"].is<int>()) {
         next.slic_shk = patch["slic"]["shk"].as<int>();
     }
-    if (patch["slic"]["line"].is<int>()) {
-        next.slic_line = patch["slic"]["line"].as<int>();
-    }
     if (patch["slic"]["pd"].is<int>()) {
         next.slic_pd = patch["slic"]["pd"].as<int>();
     }
@@ -449,15 +457,15 @@ bool applyPinsPatch(JsonVariantConst patch, A252PinsConfig& target, String& erro
     if (patch["slic_shk"].is<int>()) {
         next.slic_shk = patch["slic_shk"].as<int>();
     }
-    if (patch["slic_line"].is<int>()) {
-        next.slic_line = patch["slic_line"].as<int>();
-    }
     if (patch["slic_pd"].is<int>()) {
         next.slic_pd = patch["slic_pd"].as<int>();
     }
     if (patch["hook_active_high"].is<bool>()) {
         next.hook_active_high = patch["hook_active_high"].as<bool>();
     }
+
+    // LINE enable logic is retired on A252 bench wiring.
+    next.slic_line = -1;
 
     if (!A252ConfigStore::validatePins(next, error)) {
         return false;
@@ -591,6 +599,26 @@ void registerCommands() {
         return makeResponse(true, "RESET_METRICS");
     });
 
+    g_dispatcher.registerCommand("TONE_ON", [](const String&) {
+        return makeResponse(g_audio.startDialTone(), "TONE_ON");
+    });
+
+    g_dispatcher.registerCommand("TONE_OFF", [](const String&) {
+        g_audio.stopDialTone();
+        return makeResponse(true, "TONE_OFF");
+    });
+
+    g_dispatcher.registerCommand("AMP_ON", [](const String&) {
+        // Locked polarity: AMP_EN active LOW on GPIO21.
+        digitalWrite(kAudioAmpEnablePin, LOW);
+        return makeResponse(true, "AMP_ON");
+    });
+
+    g_dispatcher.registerCommand("AMP_OFF", [](const String&) {
+        digitalWrite(kAudioAmpEnablePin, HIGH);
+        return makeResponse(true, "AMP_OFF");
+    });
+
     g_dispatcher.registerCommand("WIFI_CONNECT", [](const String& args) {
         String ssid;
         String password_raw;
@@ -623,6 +651,8 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("WIFI_SCAN", [](const String&) {
+        // Guard BT/HFP reconnect while WiFi allocates scan resources.
+        g_bt.suspendReconnect(8000U);
         JsonDocument doc;
         JsonObject root = doc.to<JsonObject>();
         root["ok"] = true;
@@ -813,6 +843,14 @@ void registerCommands() {
 
     g_dispatcher.registerCommand("BT_DISCOVERABLE_OFF", [](const String&) {
         return makeResponse(g_bt.setDiscoverable(false), "BT_DISCOVERABLE_OFF");
+    });
+
+    g_dispatcher.registerCommand("BT_AUTO_RECONNECT_ON", [](const String&) {
+        return makeResponse(g_bt.setAutoReconnectEnabled(true), "BT_AUTO_RECONNECT_ON");
+    });
+
+    g_dispatcher.registerCommand("BT_AUTO_RECONNECT_OFF", [](const String&) {
+        return makeResponse(g_bt.setAutoReconnectEnabled(false), "BT_AUTO_RECONNECT_OFF");
     });
 
     g_dispatcher.registerCommand("BT_STATUS", [](const String&) {
@@ -1018,7 +1056,12 @@ void pollSerial() {
 
 void setup() {
     Serial.begin(kSerialBaud);
-    delay(200);
+    delay(80);
+
+    // Warm up ESP-IDF log/stdout locks from the main task context.
+    ESP_LOGI(kBootLogTag, "log lock warmup");
+    printf("[RTC_BL_PHONE] stdio lock warmup\n");
+    fflush(stdout);
 
     g_profile = BoardProfile::ESP32_A252;
     g_features = getFeatureMatrix(g_profile);
@@ -1028,9 +1071,13 @@ void setup() {
     g_pins_cfg.slic_rm = 18;
     g_pins_cfg.slic_fr = 5;
     g_pins_cfg.slic_shk = 23;
-    g_pins_cfg.slic_line = 21;
+    // LINE enable is not used on this wiring.
+    g_pins_cfg.slic_line = -1;
     g_pins_cfg.slic_pd = 19;
     g_pins_cfg.hook_active_high = true;
+
+    pinMode(kAudioAmpEnablePin, OUTPUT);
+    digitalWrite(kAudioAmpEnablePin, LOW);
     A252ConfigStore::loadAudio(g_audio_cfg);
     A252ConfigStore::loadMqtt(g_mqtt_cfg);
     A252ConfigStore::loadEspNowPeers(g_peer_store);
@@ -1041,29 +1088,30 @@ void setup() {
     g_bt.setBleCommandHandler([](const String& cmd) {
         return responseToText(executeCommandLine(cmd));
     });
-
-    g_bt.begin(g_profile);
+    g_bt.setAudioBridge(&g_audio);
 
     g_mqtt.begin(g_mqtt_cfg);
     g_mqtt.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
         processInboundBridgeCommand(source, payload);
     });
 
-    g_espnow.begin(g_peer_store);
-    g_espnow.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
-        processInboundBridgeCommand(source, payload);
-    });
-
     String ssid;
     String password;
     if (WifiCredentialsStorage::load(ssid, password)) {
-        g_wifi.connect(ssid, password, 10000, false);
+        g_wifi.connect(ssid, password, kBootWifiConnectTimeoutMs, false);
         if (g_wifi.isConnected() && g_mqtt_cfg.enabled) {
             g_mqtt.connectNow();
         }
     } else {
         g_wifi.ensureFallbackAp();
     }
+
+    g_espnow.begin(g_peer_store);
+    g_espnow.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
+        processInboundBridgeCommand(source, payload);
+    });
+
+    g_bt.begin(g_profile);
 
     g_web.setRateLimitMs(250);
     g_web.setAuthEnabled(false);
@@ -1075,17 +1123,21 @@ void setup() {
                   boardProfileToString(g_profile),
                   g_features.has_bt_classic ? "true" : "false",
                   g_features.has_full_duplex_i2s ? "true" : "false");
-    printHelp();
+    if (kPrintHelpOnBoot) {
+        printHelp();
+    }
     publishStatusIfConnected();
 }
 
 void loop() {
+    g_telephony.setIncomingRing(g_bt.callState() == "ringing");
     g_telephony.tick();
     g_wifi.loop();
+    g_bt.tick();
     g_mqtt.tick();
     g_espnow.tick();
     g_web.handle();
     pollSerial();
-    delay(10);
+    delay(1);
 }
 #endif  // UNIT_TEST

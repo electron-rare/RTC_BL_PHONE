@@ -38,6 +38,8 @@ public:
     void scanToJson(JsonArray arr, int max_networks = 20) const;
 
 private:
+    void enforceCoexPolicy() const;
+
     bool connected_;
     String ssid_;
     String password_;
@@ -46,6 +48,7 @@ private:
     String ap_password_;
     mutable uint32_t next_auto_reconnect_ms_;
     uint32_t reconnect_backoff_ms_;
+    uint32_t next_coex_reassert_ms_;
 
     bool startFallbackAp();
     void stopFallbackAp();

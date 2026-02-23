@@ -271,7 +271,7 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
     std::vector<int> used;
     used.reserve(11);
 
-    const int critical_pins[] = {
+    const int required_pins[] = {
         cfg.i2s_bck,
         cfg.i2s_ws,
         cfg.i2s_dout,
@@ -281,11 +281,10 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
         cfg.slic_rm,
         cfg.slic_fr,
         cfg.slic_shk,
-        cfg.slic_line,
         cfg.slic_pd,
     };
 
-    for (int pin : critical_pins) {
+    for (int pin : required_pins) {
         if (pin < 0 || pin > 39) {
             error = "invalid_pin_range";
             return false;
@@ -295,6 +294,19 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
             return false;
         }
         used.push_back(pin);
+    }
+
+    // Optional legacy line-enable pin, retired by default (-1).
+    if (cfg.slic_line != -1) {
+        if (cfg.slic_line < 0 || cfg.slic_line > 39) {
+            error = "invalid_pin_range";
+            return false;
+        }
+        if (std::find(used.begin(), used.end(), cfg.slic_line) != used.end()) {
+            error = "pin_conflict";
+            return false;
+        }
+        used.push_back(cfg.slic_line);
     }
 
     error = "";

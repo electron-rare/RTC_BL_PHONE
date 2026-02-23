@@ -94,3 +94,52 @@
 - ESP-NOW:
   - `ESPNOW_STATUS.ready=true`.
   - `ESPNOW_SEND` v1 et legacy en échec sur banc mono-carte (pas de pair receveur actif), à retester en configuration 2 cartes.
+
+## Exécution batch autoradio (2026-02-22)
+
+- Scope:
+  - reconnect HFP persistant type autoradio,
+  - dial queue + auto dial post-SLC,
+  - toggle runtime auto reconnect,
+  - SSE WebUI live + fallback polling,
+  - hardening coex ESP-NOW/WiFi/BT.
+- Changements appliqués:
+  - commandes série: `BT_AUTO_RECONNECT_ON/OFF`.
+  - endpoint HTTP: `POST /api/bluetooth/hfp/auto`.
+  - statut BT enrichi: `auto_reconnect_enabled`.
+- Validation manuelle attendue sur banc:
+  - `incoming GSM -> RTC ring -> décroché -> BT_ANSWER`.
+  - `dial len10 pulse` et `dial len10 dtmf` avec logs:
+    - `dial_trigger ... ok=true`
+    - `hfp_slc_connected`
+    - `hfp_dial_requested`.
+
+## Exécution batch coex/runtime (2026-02-22, run 2)
+
+- Firmware:
+  - sha256 `.pio/build/esp32dev/firmware.bin`:
+    - `2c345d5ac459e6aa914f47438cc35bbe33dda68e5a65f41eaf3d8f1efb53e833`
+- Build/flash:
+  - `platformio run -e esp32dev` -> `PASS`
+  - `platformio run -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> `PASS`
+- Validation:
+  - `python3 scripts/hw_validation.py --port-a252 /dev/cu.usbserial-0001 --report-json artifacts/hw_validation_report.json --report-md artifacts/hw_validation_report.md` -> `PASS`
+  - `bash scripts/test_terminal.sh` -> `PASS`
+  - `python3 -m unittest scripts/test_check_web_route_parity.py` -> `PASS`
+  - `python3 scripts/check_web_route_parity.py --report-json artifacts/route_parity_report.json` -> `PASS`
+
+### Correctifs inclus
+
+- Coex WiFi/BT:
+  - réimposition périodique modem sleep (`WIFI_PS_MIN_MODEM`) côté `WifiManager`.
+  - réimposition coex au bring-up stack BT (`BluetoothManager`).
+- Stabilité BT callbacks:
+  - logs GAP lourds désactivés par défaut (`kVerboseGapLogs=false`).
+- Pression RTOS/réseau:
+  - `CONFIG_ASYNC_TCP_STACK_SIZE=4096`
+  - `CONFIG_ASYNC_TCP_QUEUE_SIZE=12`
+
+### Reste à valider manuellement (bench)
+
+- endurance monitor 10 min sans `abort/assert`.
+- appel entrant GSM: sonnerie RTC + décroché RTC -> `BT_ANSWER`.

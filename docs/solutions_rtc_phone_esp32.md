@@ -63,10 +63,12 @@ void setup() {
 
 | Fonction           | ESP32 Audio Kit V2.2 Pin | Direction | Remarque                                 |
 |--------------------|--------------------------|-----------|-------------------------------------------|
-| hookSense          | GPIO36 (ADC1_CH0)        | IN        | Crochet (INPUT_PULLUP)                    |
-| ringCmd            | GPIO21                   | OUT       | Commande sonnerie (GPIO dispo)            |
-| lineEnable         | GPIO19                   | OUT       | Activation ligne (GPIO dispo)             |
-| led                | GPIO22                   | OUT       | Debug LED (ou autre GPIO libre)           |
+| hookSense (SHK)    | GPIO23                   | IN        | Crochet (INPUT_PULLUP, actif haut)        |
+| ringCmd (RM)       | GPIO18                   | OUT       | Commande sonnerie                         |
+| ringFreq (FR)      | GPIO5                    | OUT       | Modulation sonnerie                       |
+| powerDown (PD)     | GPIO19                   | OUT/OD    | Pilotage power-down SLIC                  |
+| lineEnable         | non utilisé              | -         | Logique retirée du runtime (`-1`)         |
+| ampEnable (AMP_EN) | GPIO21                   | OUT       | Ampli audio, **actif bas** (`LOW=ON`)     |
 | I2S BCK            | GPIO27                   | OUT       | I2S0_BCK_OUT (vers ES8388, casque, HP)    |
 | I2S WS             | GPIO25                   | OUT       | I2S0_WS_OUT (vers ES8388)                 |
 | I2S DIN            | GPIO26                   | OUT       | I2S0_DO_OUT (vers ES8388)                 |
@@ -75,8 +77,8 @@ void setup() {
 
 - **Aucun conflit de pin détecté** avec cette configuration sur ESP32 Audio Kit V2.2 A252.
 - Les pins I2S sont câblés d'origine vers le codec ES8388 (sortie casque, HP, entrée micro, etc.).
-- GPIO34/36 sont disponibles pour entrées analogiques (micro, hook, etc.).
-- GPIO21/19/22 sont libres sur la carte pour la logique RTC.
+- GPIO34/36 restent disponibles pour entrées analogiques supplémentaires.
+- GPIO21 est réservé à `AMP_EN` (actif bas), ne pas l'utiliser pour `LINE`.
 
 **À ajuster selon ton routage réel et la disponibilité des broches sur ta carte.**
 ## Options de câblage audio ESP32 <-> SLIC K50835F
@@ -171,10 +173,11 @@ void loop() {
    +-------------------+         +---------------------+
    |      ESP32        |         |   SLIC K50835F      |
    |                   |         |                     |
-   |  GPIO4  <-------- |---HOOK--| > Hook sense        |
-   |  GPIO5  --------> |---RING--| < Ring control      |
-   |  GPIO6  --------> |---LINE--| < Line enable       |
-   |  GPIO48 --------> |---LED---| (debug, optionnel)  |
+   |  GPIO23 <-------- |---SHK---| > Hook sense        |
+   |  GPIO18 --------> |---RM----| < Ring control      |
+   |  GPIO5  --------> |---FR----| < Ring modulation   |
+   |  GPIO19 --------> |---PD----| < Power down ctrl   |
+   |  GPIO21 --------> |--AMP_EN-| (actif bas)         |
    |                   |         |                     |
    |  I2S_OUT ------+  |         |  +-- AUDIO_IN        |
    |                |--|---------|--|                  |
@@ -183,7 +186,8 @@ void loop() {
 ```
 
 **Explications :**
-- Les signaux HOOK, RING, LINE sont à adapter selon le schéma d’application du SLIC K50835F (niveau logique, polarité, etc.).
+- Les signaux SHK/RM/FR/PD sont à adapter selon le schéma d’application du SLIC K50835F.
+- La broche `LINE` n'est pas utilisée dans la config bench validée.
 - L’audio analogique transite via un codec I2S (ex : PCM5102, ES8388) entre l’ESP32 et le SLIC K50835F.
 - Prévoir adaptation d’impédance et filtrage sur les lignes audio.
 - Les broches sont données à titre d’exemple, à ajuster selon le routage réel.

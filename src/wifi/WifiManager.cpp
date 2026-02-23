@@ -4,6 +4,7 @@
 #include "wifi/WifiCredentialsStorage.h"
 
 #include <Arduino.h>
+#include <esp_wifi.h>
 
 namespace {
 constexpr char kFallbackApPrefix[] = "RTC_BL_A252";
@@ -60,6 +61,15 @@ String buildFallbackApSsid() {
     return String(name);
 }
 
+void enforceBtCoexModemSleep() {
+    WiFi.setSleep(true);
+    const esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT && err != ESP_ERR_WIFI_NOT_STARTED) {
+        Serial.printf("[WifiManager] warn: esp_wifi_set_ps(min_modem) failed err=0x%04x\n",
+                      static_cast<unsigned>(err));
+    }
+}
+
 }  // namespace
 
 WifiManager::WifiManager()
@@ -70,7 +80,12 @@ WifiManager::WifiManager()
       ap_ssid_(buildFallbackApSsid()),
       ap_password_(kFallbackApPassword),
       next_auto_reconnect_ms_(0),
-      reconnect_backoff_ms_(3000) {}
+      reconnect_backoff_ms_(3000),
+      next_coex_reassert_ms_(0) {}
+
+void WifiManager::enforceCoexPolicy() const {
+    enforceBtCoexModemSleep();
+}
 
 bool WifiManager::begin(const char* ssid, const char* password, uint32_t timeout_ms) {
     return connect(ssid ? String(ssid) : "", password ? String(password) : "", timeout_ms, true);
@@ -89,10 +104,15 @@ bool WifiManager::connect(const String& ssid, const String& password, uint32_t t
 
     stopFallbackAp();
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
+    // Required by ESP32 WiFi+BT coexistence.
+    // Keep reconnect policy manual to avoid repeated WiFi timer churn under BT load.
+    WiFi.setAutoReconnect(false);
+    enforceCoexPolicy();  // Re-assert after mode switch to avoid BT coex abort.
     WiFi.disconnect(false, true);
+    enforceCoexPolicy();
     delay(100);
     WiFi.begin(ssid_.c_str(), password_.c_str());
+    enforceCoexPolicy();
 
     connected_ = waitForConnection(timeout_ms);
     if (connected_) {
@@ -111,8 +131,10 @@ bool WifiManager::connect(const String& ssid, const String& password, uint32_t t
         next_auto_reconnect_ms_ = 0;
         stopFallbackAp();
     } else {
+        // Clear partial STA state/timers before switching to fallback.
+        WiFi.disconnect(false, true);
         notifyWifi("connect_failed");
-        next_auto_reconnect_ms_ = millis() + reconnect_backoff_ms_;
+        next_auto_reconnect_ms_ = 0;
         startFallbackAp();
     }
     return connected_;
@@ -146,6 +168,15 @@ void WifiManager::disconnect(bool erase_credentials) {
 }
 
 void WifiManager::loop() {
+    const uint32_t now = millis();
+    if (now >= next_coex_reassert_ms_) {
+        const wifi_mode_t mode = WiFi.getMode();
+        if (mode != WIFI_MODE_NULL) {
+            enforceCoexPolicy();
+        }
+        next_coex_reassert_ms_ = now + 5000U;
+    }
+
     connected_ = (WiFi.status() == WL_CONNECTED);
     if (connected_) {
         next_auto_reconnect_ms_ = 0;
@@ -157,9 +188,7 @@ void WifiManager::loop() {
         startFallbackAp();
     }
 
-    if (!ssid_.isEmpty() && next_auto_reconnect_ms_ != 0 && millis() >= next_auto_reconnect_ms_) {
-        reconnect(5000);
-    }
+    // Manual reconnect only (WIFI_RECONNECT command).
 }
 
 void WifiManager::ensureFallbackAp() {
@@ -256,12 +285,16 @@ bool WifiManager::startFallbackAp() {
     }
 
     WiFi.mode(WIFI_AP_STA);
+    // Required by ESP32 WiFi+BT coexistence in AP+STA mode.
+    WiFi.setAutoReconnect(false);
+    enforceCoexPolicy();
     const bool ok = WiFi.softAP(
         ap_ssid_.c_str(),
         ap_password_.c_str(),
         kFallbackApChannel,
         false,
         kFallbackApMaxConnections);
+    enforceCoexPolicy();
 
     ap_active_ = ok;
     if (ok) {

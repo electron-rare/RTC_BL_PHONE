@@ -6,6 +6,7 @@ const SECTION_MAP = {
 };
 let realtimeSource = null;
 let realtimeConnected = false;
+let fallbackPollingTimer = null;
 
 function showSection(section) {
   Object.values(SECTION_MAP).forEach((id) => {
@@ -90,11 +91,12 @@ function applyStatusSnapshot(status) {
   const peers = status.espnow?.peer_count ?? 0;
   const btCallState = status.bluetooth?.call_state || "n/a";
   const btConnected = status.bluetooth?.connected ? "on" : "off";
+  const btAutoReconnect = status.bluetooth?.auto_reconnect_enabled ? "on" : "off";
   const pbapSupported = status.bluetooth?.pbap_supported ? "yes" : "no";
   const liveState = realtimeConnected ? "live=on" : "live=off";
   line.textContent =
     `board=${status.board_profile || "n/a"} telephony=${telephonyState} hook=${hook} ` +
-    `wifi=${wifiState} mqtt=${mqttConnected} espnow_peers=${peers} bt=${btConnected} bt_call=${btCallState} pbap=${pbapSupported} ${liveState}`;
+    `wifi=${wifiState} mqtt=${mqttConnected} espnow_peers=${peers} bt=${btConnected} bt_auto=${btAutoReconnect} bt_call=${btCallState} pbap=${pbapSupported} ${liveState}`;
 
   setJson("statusJson", status);
   if (status.wifi) {
@@ -121,6 +123,10 @@ function connectRealtime() {
   }
 
   realtimeSource = new EventSource("/api/events");
+
+  realtimeSource.onopen = () => {
+    realtimeConnected = true;
+  };
 
   realtimeSource.addEventListener("hello", () => {
     realtimeConnected = true;
@@ -157,6 +163,17 @@ function connectRealtime() {
   realtimeSource.onerror = () => {
     realtimeConnected = false;
   };
+}
+
+function ensureFallbackPolling() {
+  if (fallbackPollingTimer !== null) {
+    return;
+  }
+  fallbackPollingTimer = window.setInterval(() => {
+    if (!realtimeConnected) {
+      refreshStatus().catch(() => {});
+    }
+  }, 2000);
 }
 
 async function refreshStatus() {
@@ -606,6 +623,34 @@ function bindEvents() {
     }
   });
 
+  document.getElementById("btAutoReconnectOnBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/bluetooth/hfp/auto", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ enabled: true }),
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshBluetooth(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
+  document.getElementById("btAutoReconnectOffBtn").addEventListener("click", async () => {
+    try {
+      const result = await requestJson("/api/bluetooth/hfp/auto", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ enabled: false }),
+      });
+      setJson("actionResult", result);
+      await Promise.all([refreshBluetooth(), refreshStatus()]);
+    } catch (error) {
+      setJson("actionResult", { error: error.message });
+    }
+  });
+
   document.getElementById("btPbapSyncBtn").addEventListener("click", async () => {
     try {
       const result = await requestJson("/api/bluetooth/pbap/sync", {
@@ -672,6 +717,7 @@ function bindEvents() {
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
   connectRealtime();
+  ensureFallbackPolling();
   await Promise.all([refreshStatus(), refreshConfig(), refreshNetwork(), refreshBluetooth()]);
   showSection("dashboard");
 });

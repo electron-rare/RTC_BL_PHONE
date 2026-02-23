@@ -4,6 +4,7 @@
 
 namespace {
 constexpr bool kForceAuthDisabled = true;
+constexpr bool kEnableRealtimeEvents = true;
 
 String quoteArg(const String& value) {
     String escaped = value;
@@ -20,6 +21,7 @@ WebServerManager::WebServerManager(uint16_t port)
       last_status_push_ms_(0),
       status_cache_json_(""),
       status_cache_ready_(false),
+      status_cache_mux_(portMUX_INITIALIZER_UNLOCKED),
       auth_enabled_(false),
       auth_user_("admin"),
       auth_pass_("admin") {}
@@ -41,6 +43,7 @@ void WebServerManager::handle() {
     if (now - last_status_push_ms_ >= 1000U) {
         last_status_push_ms_ = now;
         refreshStatusCache();
+        publishRealtimeStatus();
     }
 }
 
@@ -78,22 +81,28 @@ void WebServerManager::setCommandExecutor(std::function<DispatchResponse(const S
 }
 
 void WebServerManager::registerRoutes() {
-    events_.onConnect([this](AsyncEventSourceClient* client) {
-        JsonDocument hello;
-        hello["transport"] = "sse";
-        hello["connected"] = true;
-        hello["ts"] = millis();
-        const String payload = toJsonString(hello);
-        client->send(payload.c_str(), "hello", millis());
-        if (status_cache_ready_) {
-            client->send(status_cache_json_.c_str(), "status", millis());
-        }
-    });
-    server_.addHandler(&events_);
+    if (kEnableRealtimeEvents) {
+        events_.onConnect([this](AsyncEventSourceClient* client) {
+            JsonDocument hello;
+            hello["transport"] = "sse";
+            hello["connected"] = true;
+            hello["ts"] = millis();
+            const String payload = toJsonString(hello);
+            client->send(payload.c_str(), "hello", millis());
+            bool ready = false;
+            const String cached = snapshotStatusCache(&ready);
+            if (ready) {
+                client->send(cached.c_str(), "status", millis());
+            }
+        });
+        server_.addHandler(&events_);
+    }
 
     server_.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        if (status_cache_ready_) {
-            request->send(200, "application/json", status_cache_json_);
+        bool ready = false;
+        const String cached = snapshotStatusCache(&ready);
+        if (ready) {
+            request->send(200, "application/json", cached);
             return;
         }
 
@@ -289,6 +298,17 @@ void WebServerManager::registerRoutes() {
     });
     server_.on("/api/bluetooth/hfp/disconnect", HTTP_POST,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_HFP_DISCONNECT"); });
+    server_.on("/api/bluetooth/hfp/auto", HTTP_GET,
+               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_STATUS"); });
+    server_.on("/api/bluetooth/hfp/auto", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        JsonDocument doc;
+        if (!extractJsonBody(request, doc)) {
+            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
+            return;
+        }
+        const bool enabled = doc["enabled"] | true;
+        handleDispatch(request, enabled ? "BT_AUTO_RECONNECT_ON" : "BT_AUTO_RECONNECT_OFF");
+    });
     server_.on("/api/bluetooth/discoverable/on", HTTP_POST,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_DISCOVERABLE_ON"); });
     server_.on("/api/bluetooth/discoverable/off", HTTP_POST,
@@ -376,27 +396,49 @@ bool WebServerManager::isEffectCommand(const String& command_line) {
 
 void WebServerManager::refreshStatusCache() {
     if (!status_callback_) {
+        portENTER_CRITICAL(&status_cache_mux_);
         status_cache_ready_ = false;
         status_cache_json_ = "";
+        portEXIT_CRITICAL(&status_cache_mux_);
         return;
     }
 
     JsonDocument doc;
     doc["auth_enabled"] = isAuthEnabled();
     status_callback_(doc.to<JsonObject>());
-    status_cache_json_ = toJsonString(doc);
+    const String payload = toJsonString(doc);
+
+    portENTER_CRITICAL(&status_cache_mux_);
+    status_cache_json_ = payload;
     status_cache_ready_ = true;
+    portEXIT_CRITICAL(&status_cache_mux_);
+}
+
+String WebServerManager::snapshotStatusCache(bool* ready) {
+    portENTER_CRITICAL(&status_cache_mux_);
+    const bool has_data = status_cache_ready_;
+    const String payload = status_cache_json_;
+    portEXIT_CRITICAL(&status_cache_mux_);
+    if (ready != nullptr) {
+        *ready = has_data;
+    }
+    return payload;
 }
 
 void WebServerManager::publishRealtimeEvent(const char* event_name, const String& payload_json) {
+    if (!kEnableRealtimeEvents) {
+        return;
+    }
     events_.send(payload_json.c_str(), event_name, millis());
 }
 
 void WebServerManager::publishRealtimeStatus() {
-    if (!status_cache_ready_) {
+    bool ready = false;
+    const String cached = snapshotStatusCache(&ready);
+    if (!ready) {
         return;
     }
-    publishRealtimeEvent("status", status_cache_json_);
+    publishRealtimeEvent("status", cached);
 }
 
 void WebServerManager::publishDispatchEvent(const String& command_line, const DispatchResponse& res) {

@@ -2,10 +2,22 @@
 
 #include <WiFi.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 
 #include <algorithm>
 
 EspNowBridge* EspNowBridge::instance_ = nullptr;
+
+namespace {
+void enforceEspNowCoexPolicy() {
+    WiFi.setSleep(true);
+    const esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT && err != ESP_ERR_WIFI_NOT_STARTED) {
+        Serial.printf("[EspNowBridge] warn: esp_wifi_set_ps(min_modem) failed err=0x%04x\n",
+                      static_cast<unsigned>(err));
+    }
+}
+}
 
 EspNowBridge::EspNowBridge() {
     instance_ = this;
@@ -18,11 +30,20 @@ bool EspNowBridge::begin(const EspNowPeerStore& initial_peers) {
 
     store_ = initial_peers;
 
-    WiFi.mode(WIFI_STA);
+    const wifi_mode_t current_mode = WiFi.getMode();
+    if (current_mode == WIFI_MODE_NULL) {
+        WiFi.mode(WIFI_STA);
+        delay(5);
+    } else if (current_mode == WIFI_MODE_AP) {
+        WiFi.mode(WIFI_AP_STA);
+        delay(5);
+    }
+    enforceEspNowCoexPolicy();
     if (esp_now_init() != ESP_OK) {
         ready_ = false;
         return false;
     }
+    enforceEspNowCoexPolicy();
 
     esp_now_register_recv_cb(onDataRecv);
     esp_now_register_send_cb(onDataSent);

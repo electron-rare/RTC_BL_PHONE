@@ -108,6 +108,15 @@ _Agent Repo & GitHub – README généré automatiquement._
 - Si décroché pendant sonnerie : `answer` automatique.
 - Si raccroché pendant appel : `end/reject` automatique.
 
+## Wiring A252 validé (bench courant)
+- `SLIC RM` -> `GPIO18`
+- `SLIC FR` -> `GPIO5`
+- `SLIC SHK` -> `GPIO23` (`INPUT_PULLUP`, hook actif haut)
+- `SLIC PD` -> `GPIO19`
+- `SLIC LINE` -> non utilisé (`-1`, logique retirée du runtime)
+- `AMP_EN` carte audio -> `GPIO21`, polarité active bas (`LOW=ON`, `HIGH=OFF`)
+- tonalité locale: `425 Hz` (couleur France/Europe)
+
 ## Choix de cartes ESP32
 Voir `docs/solutions_rtc_phone_esp32.md` pour la shortlist des DevKit utilisables (ESP32-DevKitC, ESP32-S3-DevKitC-1, NodeMCU-32S, LOLIN32), les liens de référence web, et les solutions d’interface (direct combiné/clavier, SLIC/FXS, ATA externe), dont une variante AG1171S (Silvertel).
 

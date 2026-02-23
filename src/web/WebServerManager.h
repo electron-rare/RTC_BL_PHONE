@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+#include <freertos/FreeRTOS.h>
 
 #include <functional>
 
@@ -30,6 +31,7 @@ private:
     uint32_t last_status_push_ms_;
     String status_cache_json_;
     bool status_cache_ready_;
+    portMUX_TYPE status_cache_mux_;
     bool auth_enabled_;
     String auth_user_;
     String auth_pass_;
@@ -42,6 +44,7 @@ private:
     static String toJsonString(const JsonDocument& doc);
     static bool isValidInput(const String& value, size_t max_len);
     static bool isEffectCommand(const String& command_line);
+    String snapshotStatusCache(bool* ready = nullptr);
     void refreshStatusCache();
     void publishRealtimeEvent(const char* event_name, const String& payload_json);
     void publishRealtimeStatus();
