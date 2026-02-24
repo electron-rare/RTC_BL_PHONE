@@ -144,6 +144,13 @@ bool A252ConfigStore::loadAudio(A252AudioConfig& out) {
     out.sample_rate = prefs.getUInt("sr", out.sample_rate);
     out.bits_per_sample = static_cast<uint8_t>(prefs.getUChar("bits", out.bits_per_sample));
     out.enable_capture = prefs.getBool("capture", out.enable_capture);
+    out.adc_dsp_enabled = prefs.getBool("adc_dsp", out.adc_dsp_enabled);
+    out.adc_fft_enabled = prefs.getBool("adc_fft", out.adc_fft_enabled);
+    out.adc_dsp_fft_downsample = static_cast<uint8_t>(prefs.getUChar("adc_dsp_fft_downsample", out.adc_dsp_fft_downsample));
+    out.adc_fft_ignore_low_bin =
+        static_cast<uint16_t>(prefs.getUInt("adc_fft_ignore_low_bin", out.adc_fft_ignore_low_bin));
+    out.adc_fft_ignore_high_bin =
+        static_cast<uint16_t>(prefs.getUInt("adc_fft_ignore_high_bin", out.adc_fft_ignore_high_bin));
     out.volume = static_cast<uint8_t>(prefs.getUChar("vol", out.volume));
     out.mute = prefs.getBool("mute", out.mute);
     if (prefs.isKey("route")) {
@@ -179,6 +186,11 @@ bool A252ConfigStore::saveAudio(const A252AudioConfig& cfg, String* error) {
     prefs.putUInt("sr", cfg.sample_rate);
     prefs.putUChar("bits", cfg.bits_per_sample);
     prefs.putBool("capture", cfg.enable_capture);
+    prefs.putBool("adc_dsp", cfg.adc_dsp_enabled);
+    prefs.putBool("adc_fft", cfg.adc_fft_enabled);
+    prefs.putUChar("adc_dsp_fft_downsample", cfg.adc_dsp_fft_downsample);
+    prefs.putUInt("adc_fft_ignore_low_bin", cfg.adc_fft_ignore_low_bin);
+    prefs.putUInt("adc_fft_ignore_high_bin", cfg.adc_fft_ignore_high_bin);
     prefs.putUChar("vol", cfg.volume);
     saveString(prefs, "route", cfg.route);
     prefs.putBool("mute", cfg.mute);
@@ -396,6 +408,18 @@ bool A252ConfigStore::validateAudio(const A252AudioConfig& cfg, String& error) {
         error = "invalid_bits_per_sample";
         return false;
     }
+    if (cfg.adc_dsp_fft_downsample == 0U || cfg.adc_dsp_fft_downsample > 64U) {
+        error = "invalid_adc_dsp_fft_downsample";
+        return false;
+    }
+    if (cfg.adc_fft_ignore_low_bin > 32U) {
+        error = "invalid_adc_fft_ignore_low_bin";
+        return false;
+    }
+    if (cfg.adc_fft_ignore_high_bin > 32U) {
+        error = "invalid_adc_fft_ignore_high_bin";
+        return false;
+    }
     if (cfg.volume > 100) {
         error = "invalid_volume";
         return false;
@@ -457,6 +481,11 @@ void A252ConfigStore::audioToJson(const A252AudioConfig& cfg, JsonObject obj) {
     obj["sample_rate"] = cfg.sample_rate;
     obj["bits_per_sample"] = cfg.bits_per_sample;
     obj["enable_capture"] = cfg.enable_capture;
+    obj["adc_dsp_enabled"] = cfg.adc_dsp_enabled;
+    obj["adc_fft_enabled"] = cfg.adc_fft_enabled;
+    obj["adc_dsp_fft_downsample"] = cfg.adc_dsp_fft_downsample;
+    obj["adc_fft_ignore_low_bin"] = cfg.adc_fft_ignore_low_bin;
+    obj["adc_fft_ignore_high_bin"] = cfg.adc_fft_ignore_high_bin;
     obj["volume"] = cfg.volume;
     obj["mute"] = cfg.mute;
     obj["route"] = cfg.route;

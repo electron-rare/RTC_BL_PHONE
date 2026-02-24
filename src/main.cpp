@@ -314,6 +314,11 @@ AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig
     cfg.data_in_pin = pins_cfg.i2s_din;
     cfg.capture_adc_pin = pins_cfg.slic_adc_in;
     cfg.enable_capture = audio_cfg.enable_capture;
+    cfg.adc_dsp_enabled = audio_cfg.adc_dsp_enabled;
+    cfg.adc_fft_enabled = audio_cfg.adc_fft_enabled;
+    cfg.adc_dsp_fft_downsample = audio_cfg.adc_dsp_fft_downsample;
+    cfg.adc_fft_ignore_low_bin = audio_cfg.adc_fft_ignore_low_bin;
+    cfg.adc_fft_ignore_high_bin = audio_cfg.adc_fft_ignore_high_bin;
     cfg.dma_buf_count = 8;
     cfg.dma_buf_len = 256;
     return cfg;
@@ -562,6 +567,23 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
     }
     if (patch["mute"].is<bool>()) {
         next.mute = patch["mute"].as<bool>();
+    }
+    if (patch["adc_dsp_enabled"].is<bool>()) {
+        next.adc_dsp_enabled = patch["adc_dsp_enabled"].as<bool>();
+    }
+    if (patch["adc_fft_enabled"].is<bool>()) {
+        next.adc_fft_enabled = patch["adc_fft_enabled"].as<bool>();
+    }
+    if (patch["adc_dsp_fft_downsample"].is<uint8_t>()) {
+        next.adc_dsp_fft_downsample = patch["adc_dsp_fft_downsample"].as<uint8_t>();
+    } else if (patch["adc_dsp_fft_downsample"].is<uint16_t>() && patch["adc_dsp_fft_downsample"].as<uint16_t>() <= 255U) {
+        next.adc_dsp_fft_downsample = static_cast<uint8_t>(patch["adc_dsp_fft_downsample"].as<uint16_t>());
+    }
+    if (patch["adc_fft_ignore_low_bin"].is<uint16_t>()) {
+        next.adc_fft_ignore_low_bin = patch["adc_fft_ignore_low_bin"].as<uint16_t>();
+    }
+    if (patch["adc_fft_ignore_high_bin"].is<uint16_t>()) {
+        next.adc_fft_ignore_high_bin = patch["adc_fft_ignore_high_bin"].as<uint16_t>();
     }
     if (patch["route"].is<const char*>()) {
         next.route = patch["route"].as<const char*>();
