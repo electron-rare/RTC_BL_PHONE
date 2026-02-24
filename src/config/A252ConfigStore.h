@@ -21,13 +21,24 @@ struct A252PinsConfig {
     int slic_shk = 23;
     int slic_line = -1;
     int slic_pd = 19;
+    int slic_adc_in = -1;
     bool hook_active_high = true;
+
+    int pcm_flt = -1;
+    int pcm_demp = -1;
+    int pcm_xsmt = -1;
+    int pcm_fmt = -1;
 };
 
 struct A252AudioConfig {
     uint32_t sample_rate = 16000;
     uint8_t bits_per_sample = 16;
     bool enable_capture = true;
+    bool adc_dsp_enabled = true;
+    bool adc_fft_enabled = true;
+    uint8_t adc_dsp_fft_downsample = 2U;
+    uint16_t adc_fft_ignore_low_bin = 1U;
+    uint16_t adc_fft_ignore_high_bin = 1U;
     uint8_t volume = 90;
     bool mute = false;
     String route = "rtc";

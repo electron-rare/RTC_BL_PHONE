@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "core/PlatformProfile.h"
+
 namespace {
 constexpr const char* kPinsNs = "a252-pins";
 constexpr const char* kAudioNs = "a252-audio";
@@ -26,7 +28,26 @@ bool loadJsonArray(const String& raw, JsonDocument& doc) {
 }  // namespace
 
 A252PinsConfig A252ConfigStore::defaultPins() {
-    return A252PinsConfig{};
+    A252PinsConfig cfg;
+    if (detectBoardProfile() == BoardProfile::ESP32_S3) {
+        cfg.i2s_bck = 17;
+        cfg.i2s_ws = 18;
+        cfg.i2s_dout = 21;
+        cfg.i2s_din = 39;
+        cfg.es8388_sda = -1;
+        cfg.es8388_scl = -1;
+        cfg.slic_rm = 32;
+        cfg.slic_fr = 5;
+        cfg.slic_shk = 23;
+        cfg.slic_pd = 14;
+        cfg.slic_adc_in = 34;
+        cfg.hook_active_high = true;
+        cfg.pcm_flt = 25;
+        cfg.pcm_demp = 26;
+        cfg.pcm_xsmt = 27;
+        cfg.pcm_fmt = 33;
+    }
+    return cfg;
 }
 
 A252AudioConfig A252ConfigStore::defaultAudio() {
@@ -57,7 +78,12 @@ bool A252ConfigStore::loadPins(A252PinsConfig& out) {
     out.slic_shk = prefs.getInt("slic_shk", out.slic_shk);
     out.slic_line = prefs.getInt("slic_line", out.slic_line);
     out.slic_pd = prefs.getInt("slic_pd", out.slic_pd);
+    out.slic_adc_in = prefs.getInt("slic_adc_in", out.slic_adc_in);
     out.hook_active_high = prefs.getBool("hook_hi", out.hook_active_high);
+    out.pcm_flt = prefs.getInt("pcm_flt", out.pcm_flt);
+    out.pcm_demp = prefs.getInt("pcm_demp", out.pcm_demp);
+    out.pcm_xsmt = prefs.getInt("pcm_xsmt", out.pcm_xsmt);
+    out.pcm_fmt = prefs.getInt("pcm_fmt", out.pcm_fmt);
     prefs.end();
 
     String error;
@@ -98,7 +124,12 @@ bool A252ConfigStore::savePins(const A252PinsConfig& cfg, String* error) {
     prefs.putInt("slic_shk", cfg.slic_shk);
     prefs.putInt("slic_line", cfg.slic_line);
     prefs.putInt("slic_pd", cfg.slic_pd);
+    prefs.putInt("slic_adc_in", cfg.slic_adc_in);
     prefs.putBool("hook_hi", cfg.hook_active_high);
+    prefs.putInt("pcm_flt", cfg.pcm_flt);
+    prefs.putInt("pcm_demp", cfg.pcm_demp);
+    prefs.putInt("pcm_xsmt", cfg.pcm_xsmt);
+    prefs.putInt("pcm_fmt", cfg.pcm_fmt);
     prefs.end();
     return true;
 }
@@ -276,15 +307,21 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
         cfg.i2s_ws,
         cfg.i2s_dout,
         cfg.i2s_din,
-        cfg.es8388_sda,
-        cfg.es8388_scl,
         cfg.slic_rm,
         cfg.slic_fr,
         cfg.slic_shk,
         cfg.slic_pd,
+        cfg.pcm_flt,
+        cfg.pcm_demp,
+        cfg.pcm_xsmt,
+        cfg.pcm_fmt,
+        cfg.slic_adc_in,
     };
 
     for (int pin : required_pins) {
+        if (pin < 0) {
+            continue;
+        }
         if (pin < 0 || pin > 39) {
             error = "invalid_pin_range";
             return false;
@@ -294,6 +331,43 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
             return false;
         }
         used.push_back(pin);
+    }
+
+    if (detectBoardProfile() == BoardProfile::ESP32_A252) {
+        if (cfg.es8388_sda < 0 || cfg.es8388_scl < 0) {
+            error = "invalid_pin_range";
+            return false;
+        }
+        if (cfg.es8388_sda == cfg.es8388_scl) {
+            error = "pin_conflict";
+            return false;
+        }
+        if (cfg.es8388_sda < 0 || cfg.es8388_sda > 39 || cfg.es8388_scl < 0 || cfg.es8388_scl > 39) {
+            error = "invalid_pin_range";
+            return false;
+        }
+        if (std::find(used.begin(), used.end(), cfg.es8388_sda) != used.end() ||
+            std::find(used.begin(), used.end(), cfg.es8388_scl) != used.end()) {
+            error = "pin_conflict";
+            return false;
+        }
+        used.push_back(cfg.es8388_sda);
+        used.push_back(cfg.es8388_scl);
+    } else {
+        if (cfg.es8388_sda >= 0) {
+            if (cfg.es8388_sda > 39 || std::find(used.begin(), used.end(), cfg.es8388_sda) != used.end()) {
+                error = cfg.es8388_sda > 39 ? "invalid_pin_range" : "pin_conflict";
+                return false;
+            }
+            used.push_back(cfg.es8388_sda);
+        }
+        if (cfg.es8388_scl >= 0) {
+            if (cfg.es8388_scl > 39 || std::find(used.begin(), used.end(), cfg.es8388_scl) != used.end()) {
+                error = cfg.es8388_scl > 39 ? "invalid_pin_range" : "pin_conflict";
+                return false;
+            }
+            used.push_back(cfg.es8388_scl);
+        }
     }
 
     // Optional legacy line-enable pin, retired by default (-1).
@@ -328,7 +402,7 @@ bool A252ConfigStore::validateAudio(const A252AudioConfig& cfg, String& error) {
     }
 
     const String route = cfg.route;
-    if (!(route == "rtc" || route == "bluetooth" || route == "none")) {
+    if (!(route == "rtc" || route == "none")) {
         error = "invalid_route";
         return false;
     }
@@ -369,7 +443,14 @@ void A252ConfigStore::pinsToJson(const A252PinsConfig& cfg, JsonObject obj) {
     slic["shk"] = cfg.slic_shk;
     slic["line"] = cfg.slic_line;
     slic["pd"] = cfg.slic_pd;
+    slic["adc_in"] = cfg.slic_adc_in;
     slic["hook_active_high"] = cfg.hook_active_high;
+
+    JsonObject pcm = obj["pcm"].to<JsonObject>();
+    pcm["flt"] = cfg.pcm_flt;
+    pcm["demp"] = cfg.pcm_demp;
+    pcm["xsmt"] = cfg.pcm_xsmt;
+    pcm["fmt"] = cfg.pcm_fmt;
 }
 
 void A252ConfigStore::audioToJson(const A252AudioConfig& cfg, JsonObject obj) {

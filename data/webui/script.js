@@ -89,14 +89,10 @@ function applyStatusSnapshot(status) {
   const wifiState = status.wifi?.state || "n/a";
   const mqttConnected = status.mqtt?.connected ? "on" : "off";
   const peers = status.espnow?.peer_count ?? 0;
-  const btCallState = status.bluetooth?.call_state || "n/a";
-  const btConnected = status.bluetooth?.connected ? "on" : "off";
-  const btAutoReconnect = status.bluetooth?.auto_reconnect_enabled ? "on" : "off";
-  const pbapSupported = status.bluetooth?.pbap_supported ? "yes" : "no";
   const liveState = realtimeConnected ? "live=on" : "live=off";
   line.textContent =
     `board=${status.board_profile || "n/a"} telephony=${telephonyState} hook=${hook} ` +
-    `wifi=${wifiState} mqtt=${mqttConnected} espnow_peers=${peers} bt=${btConnected} bt_auto=${btAutoReconnect} bt_call=${btCallState} pbap=${pbapSupported} ${liveState}`;
+    `wifi=${wifiState} mqtt=${mqttConnected} espnow_peers=${peers} ${liveState}`;
 
   setJson("statusJson", status);
   if (status.wifi) {
@@ -108,9 +104,6 @@ function applyStatusSnapshot(status) {
   if (status.espnow) {
     setJson("espnowJson", status.espnow);
     setJson("espnowPeersJson", { peers: status.espnow.peers || [] });
-  }
-  if (status.bluetooth) {
-    setJson("btJson", status.bluetooth);
   }
 }
 
@@ -235,15 +228,6 @@ async function refreshNetwork() {
   }
 }
 
-async function refreshBluetooth() {
-  try {
-    const bt = await requestJson("/api/bluetooth");
-    setJson("btJson", bt);
-  } catch (error) {
-    setJson("btJson", { error: error.message });
-  }
-}
-
 async function sendControl(action) {
   const result = await requestJson("/api/control", {
     method: "POST",
@@ -265,7 +249,6 @@ function bindEvents() {
   });
   document.getElementById("refreshConfigBtn").addEventListener("click", refreshConfig);
   document.getElementById("espnowRefreshBtn").addEventListener("click", refreshNetwork);
-  document.getElementById("btRefreshBtn").addEventListener("click", refreshBluetooth);
 
   document.getElementById("applyAudioConfigBtn").addEventListener("click", async () => {
     try {
@@ -493,206 +476,6 @@ function bindEvents() {
     }
   });
 
-  document.getElementById("btHfpConnectForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const addr = document.getElementById("btHfpAddr").value.trim();
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/connect", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ addr }),
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btHfpDisconnectBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/disconnect", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btDialForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const number = document.getElementById("btDialNumber").value.trim();
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/dial", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ number }),
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btRedialBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/redial", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btAnswerBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/answer", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btHangupBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/hangup", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btCallsBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/calls", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btDiscoverableOnBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/discoverable/on", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btDiscoverableOffBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/discoverable/off", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btAutoReconnectOnBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/auto", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ enabled: true }),
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btAutoReconnectOffBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/hfp/auto", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ enabled: false }),
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btPbapSyncBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/pbap/sync", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btBleStartBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/ble/start", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("btBleStopBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/bluetooth/ble/stop", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshBluetooth(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
   document.querySelectorAll("#controlSection button[data-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       try {
@@ -718,6 +501,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
   connectRealtime();
   ensureFallbackPolling();
-  await Promise.all([refreshStatus(), refreshConfig(), refreshNetwork(), refreshBluetooth()]);
+  await Promise.all([refreshStatus(), refreshConfig(), refreshNetwork()]);
   showSection("dashboard");
 });

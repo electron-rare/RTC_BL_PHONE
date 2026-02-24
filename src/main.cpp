@@ -11,7 +11,10 @@
 #include "props/EspNowBridge.h"
 #include "slic/Ks0835SlicController.h"
 #include "telephony/TelephonyService.h"
+#include "visual/ScopeDisplay.h"
 #include "wifi/WifiManagerInstance.h"
+#include "usb/UsbHostRuntime.h"
+#include "usb/UsbMassStorageRuntime.h"
 
 #ifndef UNIT_TEST
 namespace {
@@ -21,8 +24,8 @@ constexpr int kAudioAmpEnablePin = 21;
 constexpr char kBootLogTag[] = "RTC_BOOT";
 constexpr bool kPrintHelpOnBoot = false;
 
-BoardProfile g_profile = BoardProfile::ESP32_A252;
-FeatureMatrix g_features = getFeatureMatrix(BoardProfile::ESP32_A252);
+BoardProfile g_profile = detectBoardProfile();
+FeatureMatrix g_features = getFeatureMatrix(g_profile);
 
 A252PinsConfig g_pins_cfg = A252ConfigStore::defaultPins();
 A252AudioConfig g_audio_cfg = A252ConfigStore::defaultAudio();
@@ -35,6 +38,7 @@ Es8388Driver g_codec;
 TelephonyService g_telephony;
 EspNowBridge g_espnow;
 CommandDispatcher g_dispatcher;
+ScopeDisplay g_scope_display;
 String g_serial_line;
 
 DispatchResponse makeResponse(bool ok, const String& code) {
@@ -308,10 +312,26 @@ AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig
     cfg.ws_pin = pins_cfg.i2s_ws;
     cfg.data_out_pin = pins_cfg.i2s_dout;
     cfg.data_in_pin = pins_cfg.i2s_din;
+    cfg.capture_adc_pin = pins_cfg.slic_adc_in;
     cfg.enable_capture = audio_cfg.enable_capture;
     cfg.dma_buf_count = 8;
     cfg.dma_buf_len = 256;
     return cfg;
+}
+
+void applyPcm5102ControlPins(const A252PinsConfig& pins_cfg) {
+    auto apply = [](int pin, int value) {
+        if (pin < 0) {
+            return;
+        }
+        pinMode(pin, OUTPUT);
+        digitalWrite(pin, value);
+    };
+
+    apply(pins_cfg.pcm_flt, LOW);
+    apply(pins_cfg.pcm_demp, LOW);
+    apply(pins_cfg.pcm_xsmt, HIGH);
+    apply(pins_cfg.pcm_fmt, LOW);
 }
 
 bool applyHardwareConfig() {
@@ -328,22 +348,26 @@ bool applyHardwareConfig() {
     g_slic.setPowerDown(false);
     g_slic.setRing(false);
 
-    const bool codec_ok = g_codec.begin(g_pins_cfg.es8388_sda, g_pins_cfg.es8388_scl);
-    g_codec.setVolume(g_audio_cfg.volume);
-    g_codec.setMute(g_audio_cfg.mute);
-    g_codec.setRoute(g_audio_cfg.route);
+    bool codec_ok = true;
+    if (g_profile == BoardProfile::ESP32_A252) {
+        codec_ok = g_codec.begin(g_pins_cfg.es8388_sda, g_pins_cfg.es8388_scl);
+        g_codec.setVolume(g_audio_cfg.volume);
+        g_codec.setMute(g_audio_cfg.mute);
+        g_codec.setRoute(g_audio_cfg.route);
+    }
 
+    applyPcm5102ControlPins(g_pins_cfg);
     const AudioConfig audio = buildI2sConfig(g_pins_cfg, g_audio_cfg);
     const bool audio_ok = g_audio.begin(audio);
     g_audio.resetMetrics();
 
     g_telephony.begin(g_profile, g_slic, g_audio);
     g_telephony.setDialCallback([](const String& number) {
-        Serial.printf("[Telephony] dial request ignored (BT disabled): %s\n", number.c_str());
+        Serial.printf("[Telephony] dial callback disabled for routing: %s\n", number.c_str());
         return false;
     });
     g_telephony.setAnswerCallback([]() {
-        Serial.println("[Telephony] answer request ignored (BT disabled)");
+        Serial.println("[Telephony] answer callback disabled");
         return false;
     });
 
@@ -374,6 +398,9 @@ void appendAudioMetrics(JsonObject root) {
     audio["underrun"] = metrics.underrun_count;
     audio["drop"] = metrics.drop_frames;
     audio["latence_ms"] = metrics.last_latency_ms;
+    audio["adc_fft_peak_bin"] = metrics.adc_fft_peak_bin;
+    audio["adc_fft_peak_freq_hz"] = metrics.adc_fft_peak_freq_hz;
+    audio["adc_fft_peak_mag"] = metrics.adc_fft_peak_magnitude;
 }
 
 void fillStatusSnapshot(JsonObject root) {
@@ -385,6 +412,12 @@ void fillStatusSnapshot(JsonObject root) {
     telephony["hook"] = g_slic.isHookOff() ? "OFF_HOOK" : "ON_HOOK";
 
     appendAudioMetrics(root);
+
+    JsonObject scope = root["scope_display"].to<JsonObject>();
+    scope["supported"] = g_scope_display.supported();
+    scope["enabled"] = g_scope_display.enabled();
+    scope["frequency"] = g_scope_display.frequency();
+    scope["amplitude"] = g_scope_display.amplitude();
 
     JsonObject espnow = root["espnow"].to<JsonObject>();
     g_espnow.statusToJson(espnow);
@@ -432,8 +465,23 @@ bool applyPinsPatch(JsonVariantConst patch, A252PinsConfig& target, String& erro
     if (patch["slic"]["pd"].is<int>()) {
         next.slic_pd = patch["slic"]["pd"].as<int>();
     }
+    if (patch["slic"]["adc_in"].is<int>()) {
+        next.slic_adc_in = patch["slic"]["adc_in"].as<int>();
+    }
     if (patch["slic"]["hook_active_high"].is<bool>()) {
         next.hook_active_high = patch["slic"]["hook_active_high"].as<bool>();
+    }
+    if (patch["pcm"]["flt"].is<int>()) {
+        next.pcm_flt = patch["pcm"]["flt"].as<int>();
+    }
+    if (patch["pcm"]["demp"].is<int>()) {
+        next.pcm_demp = patch["pcm"]["demp"].as<int>();
+    }
+    if (patch["pcm"]["xsmt"].is<int>()) {
+        next.pcm_xsmt = patch["pcm"]["xsmt"].as<int>();
+    }
+    if (patch["pcm"]["fmt"].is<int>()) {
+        next.pcm_fmt = patch["pcm"]["fmt"].as<int>();
     }
 
     if (patch["i2s_bck"].is<int>()) {
@@ -468,8 +516,23 @@ bool applyPinsPatch(JsonVariantConst patch, A252PinsConfig& target, String& erro
     if (patch["slic_pd"].is<int>()) {
         next.slic_pd = patch["slic_pd"].as<int>();
     }
+    if (patch["slic_adc_in"].is<int>()) {
+        next.slic_adc_in = patch["slic_adc_in"].as<int>();
+    }
     if (patch["hook_active_high"].is<bool>()) {
         next.hook_active_high = patch["hook_active_high"].as<bool>();
+    }
+    if (patch["pcm_flt"].is<int>()) {
+        next.pcm_flt = patch["pcm_flt"].as<int>();
+    }
+    if (patch["pcm_demp"].is<int>()) {
+        next.pcm_demp = patch["pcm_demp"].as<int>();
+    }
+    if (patch["pcm_xsmt"].is<int>()) {
+        next.pcm_xsmt = patch["pcm_xsmt"].as<int>();
+    }
+    if (patch["pcm_fmt"].is<int>()) {
+        next.pcm_fmt = patch["pcm_fmt"].as<int>();
     }
 
     next.slic_line = -1;
@@ -629,6 +692,53 @@ void registerCommands() {
         return makeResponse(true, "CAPTURE_STOP");
     });
 
+    g_dispatcher.registerCommand("OSC_START", [](const String& args) {
+        String first;
+        String rest;
+        uint16_t freq = 1200U;
+        uint8_t amp = 48U;
+
+        if (!args.isEmpty()) {
+            if (!splitFirstToken(args, first, rest)) {
+                return makeResponse(false, "OSC_START invalid_args");
+            }
+            const int parsed_freq = first.toInt();
+            if (parsed_freq > 0) {
+                freq = static_cast<uint16_t>(parsed_freq);
+            }
+            if (!rest.isEmpty()) {
+                const int parsed_amp = rest.toInt();
+                if (parsed_amp > 0) {
+                    amp = static_cast<uint8_t>(parsed_amp);
+                }
+            }
+            if (!g_scope_display.configure(freq, amp)) {
+                return makeResponse(false, "OSC_START invalid_config");
+            }
+        }
+
+        if (!g_scope_display.begin()) {
+            return makeResponse(false, "OSC_START not_supported");
+        }
+        g_scope_display.enable(true);
+        return makeResponse(true, "OSC_START");
+    });
+
+    g_dispatcher.registerCommand("OSC_STOP", [](const String&) {
+        g_scope_display.enable(false);
+        return makeResponse(true, "OSC_STOP");
+    });
+
+    g_dispatcher.registerCommand("OSC_STATUS", [](const String&) {
+        JsonDocument out;
+        JsonObject scope = out.to<JsonObject>();
+        scope["supported"] = g_scope_display.supported();
+        scope["enabled"] = g_scope_display.enabled();
+        scope["frequency"] = g_scope_display.frequency();
+        scope["amplitude"] = g_scope_display.amplitude();
+        return jsonResponse(out);
+    });
+
     g_dispatcher.registerCommand("PLAY", [](const String& args) {
         const String path = args.isEmpty() ? "/welcome.wav" : args;
         return makeResponse(g_audio.playFile(path.c_str()), "PLAY");
@@ -779,9 +889,11 @@ void registerCommands() {
         }
 
         g_audio_cfg = next;
-        g_codec.setVolume(g_audio_cfg.volume);
-        g_codec.setMute(g_audio_cfg.mute);
-        g_codec.setRoute(g_audio_cfg.route);
+        if (g_profile == BoardProfile::ESP32_A252) {
+            g_codec.setVolume(g_audio_cfg.volume);
+            g_codec.setMute(g_audio_cfg.mute);
+            g_codec.setRoute(g_audio_cfg.route);
+        }
         const bool audio_ok = g_audio.begin(buildI2sConfig(g_pins_cfg, g_audio_cfg));
         return makeResponse(audio_ok, "AUDIO_CONFIG_SET");
     });
@@ -910,8 +1022,18 @@ void setup() {
     printf("[RTC_BL_PHONE] stdio lock warmup\n");
     fflush(stdout);
 
-    g_profile = BoardProfile::ESP32_A252;
+    g_profile = detectBoardProfile();
     g_features = getFeatureMatrix(g_profile);
+
+#ifdef USB_HOST_BOOT_ENABLE
+    const bool usb_host = usb_host_runtime::enableHostPortPower();
+    Serial.printf("[RTC_BL_PHONE] USB host bootstrap: %s\n", usb_host ? "ok" : "not available");
+#endif
+
+#ifdef USB_MSC_BOOT_ENABLE
+    const bool usb_msc = usb_msc_runtime::beginUsbMassStorage();
+    Serial.printf("[RTC_BL_PHONE] USB MSC bootstrap: %s\n", usb_msc ? "ok" : "failed");
+#endif
 
     A252ConfigStore::loadPins(g_pins_cfg);
     g_pins_cfg.slic_line = -1;
@@ -939,6 +1061,7 @@ void setup() {
 
 void loop() {
     g_telephony.tick();
+    g_scope_display.tick();
     g_espnow.tick();
     pollSerial();
     delay(1);

@@ -9,10 +9,7 @@ enum class BoardProfile : uint8_t {
 };
 
 struct FeatureMatrix {
-    bool has_bt_classic;
-    bool has_hfp;
     bool has_full_duplex_i2s;
-    bool has_ble_control;
 };
 
 BoardProfile detectBoardProfile();

@@ -100,9 +100,8 @@ bool Es8388Driver::setRoute(const String& route) {
         return false;
     }
 
-    // Current hardware path uses DAC->mixer->line output for both RTC and BT.
-    // Keep route as metadata and ensure output path is enabled.
-    if (route_ == "bluetooth" || route_ == "rtc") {
+    // Keep route as metadata and ensure output path is enabled for RTC.
+    if (route_ == "rtc") {
         return writeReg(0x26, 0x00) && writeReg(0x27, 0x90) && writeReg(0x2A, 0x90) &&
                writeReg(0x04, 0x3C);
     }

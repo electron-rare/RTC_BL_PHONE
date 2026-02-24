@@ -1,6 +1,10 @@
 #include "web/WebServerManager.h"
 
+#ifdef USB_MSC_BOOT_ENABLE
+#include <FFat.h>
+#else
 #include <SPIFFS.h>
+#endif
 
 namespace {
 constexpr bool kForceAuthDisabled = true;
@@ -27,11 +31,19 @@ WebServerManager::WebServerManager(uint16_t port)
       auth_pass_("admin") {}
 
 void WebServerManager::begin() {
+#ifdef USB_MSC_BOOT_ENABLE
+    if (FFat.begin(true, "/usbmsc", 10, "usbmsc")) {
+        server_.serveStatic("/", FFat, "/webui/").setDefaultFile("index.html");
+    } else {
+        Serial.println("[WebServerManager] FFat mount failed (label usbmsc)");
+    }
+#else
     if (!SPIFFS.begin(true)) {
         Serial.println("[WebServerManager] SPIFFS mount failed");
     } else {
         server_.serveStatic("/", SPIFFS, "/webui/").setDefaultFile("index.html");
     }
+#endif
 
     registerRoutes();
     server_.begin();
@@ -280,68 +292,6 @@ void WebServerManager::registerRoutes() {
         handleDispatch(request, "ESPNOW_SEND " + mac + " " + payload);
     });
 
-    // Bluetooth.
-    server_.on("/api/bluetooth", HTTP_GET,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_STATUS"); });
-    server_.on("/api/bluetooth/hfp/connect", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        if (!extractJsonBody(request, doc)) {
-            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
-            return;
-        }
-        const String addr = doc["addr"] | "";
-        if (!isValidInput(addr, 32)) {
-            request->send(400, "application/json", "{\"error\":\"invalid addr\"}");
-            return;
-        }
-        handleDispatch(request, "BT_HFP_CONNECT " + addr);
-    });
-    server_.on("/api/bluetooth/hfp/disconnect", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_HFP_DISCONNECT"); });
-    server_.on("/api/bluetooth/hfp/auto", HTTP_GET,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_STATUS"); });
-    server_.on("/api/bluetooth/hfp/auto", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        if (!extractJsonBody(request, doc)) {
-            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
-            return;
-        }
-        const bool enabled = doc["enabled"] | true;
-        handleDispatch(request, enabled ? "BT_AUTO_RECONNECT_ON" : "BT_AUTO_RECONNECT_OFF");
-    });
-    server_.on("/api/bluetooth/discoverable/on", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_DISCOVERABLE_ON"); });
-    server_.on("/api/bluetooth/discoverable/off", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_DISCOVERABLE_OFF"); });
-    server_.on("/api/bluetooth/hfp/dial", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        if (!extractJsonBody(request, doc)) {
-            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
-            return;
-        }
-        const String number = doc["number"] | "";
-        if (!isValidInput(number, 32)) {
-            request->send(400, "application/json", "{\"error\":\"invalid number\"}");
-            return;
-        }
-        handleDispatch(request, "BT_DIAL " + number);
-    });
-    server_.on("/api/bluetooth/hfp/redial", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_REDIAL"); });
-    server_.on("/api/bluetooth/hfp/answer", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_ANSWER"); });
-    server_.on("/api/bluetooth/hfp/hangup", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_HANGUP"); });
-    server_.on("/api/bluetooth/hfp/calls", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_CALLS"); });
-    server_.on("/api/bluetooth/pbap/sync", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_PBAP_SYNC"); });
-    server_.on("/api/bluetooth/ble/start", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_BLE_START"); });
-    server_.on("/api/bluetooth/ble/stop", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_BLE_STOP"); });
-}
-
 bool WebServerManager::authenticateRequest(AsyncWebServerRequest* request) const {
     if (kForceAuthDisabled || !auth_enabled_) {
         return true;
@@ -389,9 +339,7 @@ bool WebServerManager::isEffectCommand(const String& command_line) {
     token.trim();
     token.toUpperCase();
 
-    return token == "CALL" || token == "PLAY" || token == "CAPTURE_START" || token == "CAPTURE_STOP" ||
-           token == "BT_DIAL" || token == "DIAL" || token == "BT_REDIAL" || token == "BT_ANSWER" ||
-           token == "BT_HANGUP";
+    return token == "CALL" || token == "PLAY" || token == "CAPTURE_START" || token == "CAPTURE_STOP";
 }
 
 void WebServerManager::refreshStatusCache() {

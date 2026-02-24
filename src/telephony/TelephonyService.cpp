@@ -219,7 +219,7 @@ void TelephonyService::commitDialBuffer(const char* reason) {
 
     const String number = dial_buffer_;
     const bool ok = dial_callback_ ? dial_callback_(number) : false;
-    last_dial_error_ = ok ? "" : "bt_dial_failed";
+    last_dial_error_ = ok ? "" : "dial_failed";
     Serial.printf("[Telephony] dial_trigger reason=%s number=%s ok=%s\n",
                   reason != nullptr ? reason : "unknown",
                   number.c_str(),
@@ -282,10 +282,9 @@ void TelephonyService::tick() {
                 ring_phase_on_ = false;
                 slic_->setRing(false);
                 const bool answered = answer_callback_ ? answer_callback_() : false;
-                // While transitioning from incoming ring to call answer, keep dial tone muted
-                // even if BT answer fails transiently.
+                // Keep dial tone muted while transitioning from incoming ring to call answer.
                 suppress_dial_tone_ = true;
-                last_dial_error_ = answered ? "" : "bt_answer_failed";
+                last_dial_error_ = answered ? "" : "answer_failed";
                 state_ = TelephonyState::OFF_HOOK;
                 break;
             }

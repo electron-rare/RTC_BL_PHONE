@@ -61,7 +61,7 @@ String buildFallbackApSsid() {
     return String(name);
 }
 
-void enforceBtCoexModemSleep() {
+void enforceCoexModemSleep() {
     WiFi.setSleep(true);
     const esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT && err != ESP_ERR_WIFI_NOT_STARTED) {
@@ -84,7 +84,7 @@ WifiManager::WifiManager()
       next_coex_reassert_ms_(0) {}
 
 void WifiManager::enforceCoexPolicy() const {
-    enforceBtCoexModemSleep();
+    enforceCoexModemSleep();
 }
 
 bool WifiManager::begin(const char* ssid, const char* password, uint32_t timeout_ms) {
@@ -104,10 +104,9 @@ bool WifiManager::connect(const String& ssid, const String& password, uint32_t t
 
     stopFallbackAp();
     WiFi.mode(WIFI_STA);
-    // Required by ESP32 WiFi+BT coexistence.
-    // Keep reconnect policy manual to avoid repeated WiFi timer churn under BT load.
+    // Keep reconnect policy manual to avoid repeated WiFi timer churn from external clients.
     WiFi.setAutoReconnect(false);
-    enforceCoexPolicy();  // Re-assert after mode switch to avoid BT coex abort.
+    enforceCoexPolicy();
     WiFi.disconnect(false, true);
     enforceCoexPolicy();
     delay(100);
@@ -285,7 +284,7 @@ bool WifiManager::startFallbackAp() {
     }
 
     WiFi.mode(WIFI_AP_STA);
-    // Required by ESP32 WiFi+BT coexistence in AP+STA mode.
+    // Keep a stable WiFi mode under AP+STA conditions.
     WiFi.setAutoReconnect(false);
     enforceCoexPolicy();
     const bool ok = WiFi.softAP(
