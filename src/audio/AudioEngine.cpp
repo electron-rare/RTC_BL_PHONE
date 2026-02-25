@@ -501,7 +501,18 @@ bool AudioEngine::begin(const AudioConfig& config) {
     i2s_cfg.auto_clear = true;
 
     if (!i2s_stream_.begin(i2s_cfg)) {
-        Serial.println("[AudioEngine] i2s begin failed");
+        Serial.printf("[AudioEngine] i2s begin failed: port=%d mode=%d sr=%u bits=%d ch=%d bck=%d ws=%d dout=%d din=%d dma_cnt=%u dma_len=%u\n",
+                      static_cast<int>(i2s_cfg.port_no),
+                      static_cast<int>(mode),
+                      static_cast<unsigned>(i2s_cfg.sample_rate),
+                      static_cast<int>(i2s_cfg.bits_per_sample),
+                      static_cast<int>(i2s_cfg.channels),
+                      static_cast<int>(i2s_cfg.pin_bck),
+                      static_cast<int>(i2s_cfg.pin_ws),
+                      static_cast<int>(i2s_cfg.pin_data),
+                      static_cast<int>(i2s_cfg.pin_data_rx),
+                      static_cast<unsigned>(i2s_cfg.buffer_count),
+                      static_cast<unsigned>(i2s_cfg.buffer_size));
         driver_installed_ = false;
         return false;
     }
@@ -845,6 +856,10 @@ bool AudioEngine::isPlaying() const {
 
 bool AudioEngine::isSdReady() const {
     return audio_fs_ready_;
+}
+
+bool AudioEngine::isReady() const {
+    return driver_installed_;
 }
 
 AudioRuntimeMetrics AudioEngine::metrics() const {

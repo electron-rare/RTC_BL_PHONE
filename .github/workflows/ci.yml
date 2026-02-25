@@ -7,7 +7,7 @@ on:
     branches: [main, release/stable]
 
 jobs:
-  pre-merge:
+  branch-gate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -23,8 +23,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install platformio
 
-      - name: Run pre-merge gate
-        run: ./scripts/pre_merge.sh
+      - name: Run branch gate
+        run: ./scripts/branch_gate.sh --profile a252
 
       - name: Upload route parity report
         if: always()

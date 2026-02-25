@@ -72,6 +72,7 @@ public:
     virtual bool supportsFullDuplex() const;
     virtual bool isPlaying() const;
     virtual bool isSdReady() const;
+    virtual bool isReady() const;
     virtual AudioRuntimeMetrics metrics() const;
     virtual void resetMetrics();
     virtual void tick();

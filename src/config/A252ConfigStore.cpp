@@ -9,7 +9,6 @@
 namespace {
 constexpr const char* kPinsNs = "a252-pins";
 constexpr const char* kAudioNs = "a252-audio";
-constexpr const char* kMqttNs = "mqtt";
 constexpr const char* kEspNowNs = "espnow";
 constexpr const char* kEspNowCallMapNs = "espnow-call";
 
@@ -87,10 +86,6 @@ A252PinsConfig A252ConfigStore::defaultPins() {
 
 A252AudioConfig A252ConfigStore::defaultAudio() {
     return A252AudioConfig{};
-}
-
-MqttConfig A252ConfigStore::defaultMqtt() {
-    return MqttConfig{};
 }
 
 bool A252ConfigStore::loadPins(A252PinsConfig& out) {
@@ -233,64 +228,6 @@ bool A252ConfigStore::saveAudio(const A252AudioConfig& cfg, String* error) {
     return true;
 }
 
-bool A252ConfigStore::loadMqtt(MqttConfig& out) {
-    out = defaultMqtt();
-    Preferences prefs;
-    if (!prefs.begin(kMqttNs, false)) {
-        return false;
-    }
-
-    out.enabled = prefs.getBool("enabled", out.enabled);
-    if (prefs.isKey("host")) {
-        out.host = prefs.getString("host", out.host);
-    }
-    out.port = static_cast<uint16_t>(prefs.getUShort("port", out.port));
-    if (prefs.isKey("user")) {
-        out.user = prefs.getString("user", out.user);
-    }
-    if (prefs.isKey("pass")) {
-        out.pass = prefs.getString("pass", out.pass);
-    }
-    if (prefs.isKey("topic")) {
-        out.base_topic = prefs.getString("topic", out.base_topic);
-    }
-    prefs.end();
-
-    String error;
-    if (!validateMqtt(out, error)) {
-        out = defaultMqtt();
-        return false;
-    }
-    return true;
-}
-
-bool A252ConfigStore::saveMqtt(const MqttConfig& cfg, String* error) {
-    String local_error;
-    if (!validateMqtt(cfg, local_error)) {
-        if (error) {
-            *error = local_error;
-        }
-        return false;
-    }
-
-    Preferences prefs;
-    if (!prefs.begin(kMqttNs, false)) {
-        if (error) {
-            *error = "nvs_open_failed";
-        }
-        return false;
-    }
-
-    prefs.putBool("enabled", cfg.enabled);
-    saveString(prefs, "host", cfg.host);
-    prefs.putUShort("port", cfg.port);
-    saveString(prefs, "user", cfg.user);
-    saveString(prefs, "pass", cfg.pass);
-    saveString(prefs, "topic", cfg.base_topic);
-    prefs.end();
-    return true;
-}
-
 bool A252ConfigStore::loadEspNowPeers(EspNowPeerStore& out) {
     out.peers.clear();
 
@@ -406,7 +343,7 @@ bool A252ConfigStore::saveEspNowPeers(const EspNowPeerStore& store, String* erro
 
 bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
     std::vector<int> used;
-    used.reserve(11);
+    used.reserve(14);
 
     const int required_pins[] = {
         cfg.i2s_bck,
@@ -417,6 +354,9 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
         cfg.slic_fr,
         cfg.slic_shk,
         cfg.slic_pd,
+    };
+
+    const int optional_pins[] = {
         cfg.slic_adc_in,
         cfg.pcm_flt,
         cfg.pcm_demp,
@@ -425,6 +365,21 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
     };
 
     for (int pin : required_pins) {
+        if (pin < 0 || pin > 39) {
+            error = "invalid_pin_range";
+            return false;
+        }
+        if (std::find(used.begin(), used.end(), pin) != used.end()) {
+            error = "pin_conflict";
+            return false;
+        }
+        used.push_back(pin);
+    }
+
+    for (int pin : optional_pins) {
+        if (pin == -1) {
+            continue;
+        }
         if (pin < 0 || pin > 39) {
             error = "invalid_pin_range";
             return false;
@@ -526,21 +481,6 @@ bool A252ConfigStore::validateAudio(const A252AudioConfig& cfg, String& error) {
     return true;
 }
 
-bool A252ConfigStore::validateMqtt(const MqttConfig& cfg, String& error) {
-    if (cfg.port == 0) {
-        error = "invalid_port";
-        return false;
-    }
-
-    if (cfg.base_topic.isEmpty()) {
-        error = "invalid_base_topic";
-        return false;
-    }
-
-    error = "";
-    return true;
-}
-
 void A252ConfigStore::pinsToJson(const A252PinsConfig& cfg, JsonObject obj) {
     JsonObject i2s = obj["i2s"].to<JsonObject>();
     i2s["bck"] = cfg.i2s_bck;
@@ -580,17 +520,6 @@ void A252ConfigStore::audioToJson(const A252AudioConfig& cfg, JsonObject obj) {
     obj["volume"] = cfg.volume;
     obj["mute"] = cfg.mute;
     obj["route"] = cfg.route;
-}
-
-void A252ConfigStore::mqttToJson(const MqttConfig& cfg, JsonObject obj, bool include_secret) {
-    obj["enabled"] = cfg.enabled;
-    obj["host"] = cfg.host;
-    obj["port"] = cfg.port;
-    obj["user"] = cfg.user;
-    obj["base_topic"] = cfg.base_topic;
-    if (include_secret) {
-        obj["pass"] = cfg.pass;
-    }
 }
 
 void A252ConfigStore::peersToJson(const EspNowPeerStore& store, JsonArray arr) {
