@@ -3,61 +3,32 @@
 Projet ESP32 : téléphone RTC, SLIC, audio, Bluetooth, WiFi, agentic.
 
 ## CI/CD automatisé
-Le pipeline CI/CD est géré par GitHub Actions et PlatformIO :
+Le pipeline CI/CD est géré par GitHub Actions + PlatformIO.
 
-- **Déclenchement** : à chaque push ou pull request sur `main` ou `develop`.
-- **Build** : compilation automatique du firmware via PlatformIO.
-- **Tests** : exécution des tests unitaires avec `platformio test`.
-- **Artefacts** : génération et upload automatique des binaires compilés.
-- **Couverture** : rapport de couverture (optionnel, si supporté).
-- **Livraison** : artefacts accessibles dans l’onglet Actions > workflow CI PlatformIO.
+- **Déclenchement** : à chaque push ou pull request sur `main` ou `release/stable`.
+- **Gate de validation** : exécution du script `scripts/pre_merge.sh` (ordre de checks unifié).
+- **Vérifications** : tests Python/unit, tests hôte DTMF, parity WebUI/commandes, puis builds des cibles actives.
+- **Artefact** : `artifacts/route_parity_report.json` généré par la gate.
 
-### Structure du workflow
-Le fichier `.github/workflows/ci.yml` contient :
+### Gate de branche (qualité)
+Le script de référence est `scripts/pre_merge.sh` (définition dans [docs/branch_quality_gate.md](docs/branch_quality_gate.md)).  
+Commande locale recommandée :
 
-```yaml
-name: CI PlatformIO
-on:
-	push:
-		branches: [ main, develop ]
-	pull_request:
-		branches: [ main, develop ]
-jobs:
-	build-test:
-		runs-on: ubuntu-latest
-		steps:
-			- name: Checkout code
-				uses: actions/checkout@v3
-			- name: Set up Python
-				uses: actions/setup-python@v4
-				with:
-					python-version: '3.10'
-			- name: Install PlatformIO
-				run: pip install platformio
-			- name: Run PlatformIO tests
-				run: platformio test
-			- name: Build firmware
-				run: platformio run
-			- name: Upload firmware artifact
-				uses: actions/upload-artifact@v3
-				with:
-					name: firmware
-					path: .pio/build/*/*.bin
-			# Optionnel: Génération de la couverture si supportée
-			# - name: Generate coverage report
-			#   run: platformio test --coverage
-			# - name: Upload coverage artifact
-			#   uses: actions/upload-artifact@v3
-			#   with:
-			#     name: coverage
-			#     path: coverage-report/*
+```bash
+bash scripts/pre_merge.sh
 ```
 
-### Livraison
+Exécuter uniquement les checks sans build (ex. pour un contrôle rapide local) :
+
+```bash
+bash scripts/test_terminal.sh
+```
+
+## Livraison
 Après chaque build, les binaires sont disponibles en téléchargement dans les artefacts du workflow.
 
 ### Tests
-Les tests sont lancés automatiquement à chaque commit. Voir les rapports dans l’onglet Actions.
+Les tests sont lancés automatiquement à chaque commit dans `.github/workflows/ci.yml`.
 
 ### Références
 - [PlatformIO CI Docs](https://docs.platformio.org/en/latest/ci/index.html)

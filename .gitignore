@@ -428,4 +428,6 @@ coverage/
 *~
 
 # Project data
+# If data/audio was previously committed, run:
+#   git rm --cached -r data/audio
 data/audio/

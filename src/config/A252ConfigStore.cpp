@@ -417,17 +417,14 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
         cfg.slic_fr,
         cfg.slic_shk,
         cfg.slic_pd,
+        cfg.slic_adc_in,
         cfg.pcm_flt,
         cfg.pcm_demp,
         cfg.pcm_xsmt,
         cfg.pcm_fmt,
-        cfg.slic_adc_in,
     };
 
     for (int pin : required_pins) {
-        if (pin < 0) {
-            continue;
-        }
         if (pin < 0 || pin > 39) {
             error = "invalid_pin_range";
             return false;

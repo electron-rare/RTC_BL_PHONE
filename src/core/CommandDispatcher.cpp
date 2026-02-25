@@ -43,6 +43,10 @@ DispatchResponse CommandDispatcher::dispatch(const String& line) const {
     return it->second(args);
 }
 
+bool CommandDispatcher::hasCommand(const String& name) const {
+    return handlers_.find(normalizeCommand(name)) != handlers_.end();
+}
+
 String CommandDispatcher::helpText() const {
     String out;
     out.reserve(order_.size() * 24);

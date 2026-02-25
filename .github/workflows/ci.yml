@@ -7,9 +7,8 @@ on:
     branches: [main, release/stable]
 
 jobs:
-  build-and-test:
+  pre-merge:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,11 +18,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Test Web Route Parity Parser
-        run: python3 -m unittest scripts/test_check_web_route_parity.py
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
 
-      - name: Check Web Route Parity
-        run: python3 scripts/check_web_route_parity.py --report-json artifacts/route_parity_report.json
+      - name: Run pre-merge gate
+        run: ./scripts/pre_merge.sh
 
       - name: Upload route parity report
         if: always()
@@ -32,17 +33,3 @@ jobs:
           name: route-parity-report
           path: artifacts/route_parity_report.json
           if-no-files-found: warn
-
-      - name: Install PlatformIO
-        run: |
-          python -m pip install --upgrade pip
-          pip install platformio
-
-      - name: Validate hw runner syntax
-        run: python -m py_compile scripts/hw_validation.py
-
-      - name: Build firmware
-        run: platformio run -e esp32dev
-
-      - name: Build unit tests (no upload)
-        run: platformio test --without-uploading --without-testing -e esp32dev

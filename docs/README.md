@@ -49,6 +49,7 @@ Chaque fiche détaille : rôle, API, notifications, points de validation, synerg
 | QA moniteur série           | protocole_test_qa_moniteur_serie.md |
 | Robustesse RTOS             | audit_robustesse_rtos.md      |
 | Sécurité web                | audit_securite_web.md         |
+| Gate qualité                | branch_quality_gate.md         |
 
 ## Rapports
 | Rapport                     | Fichier                       |

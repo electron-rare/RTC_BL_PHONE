@@ -20,6 +20,7 @@ public:
 
     void registerCommand(const String& name, Handler handler);
     DispatchResponse dispatch(const String& line) const;
+    bool hasCommand(const String& name) const;
     String helpText() const;
     std::vector<String> commands() const;
 

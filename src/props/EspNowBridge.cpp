@@ -20,6 +20,23 @@ void enforceEspNowCoexPolicy() {
                       static_cast<unsigned>(err));
     }
 }
+
+bool isBroadcastTarget(const String& target) {
+    return target.equalsIgnoreCase("broadcast");
+}
+
+bool parseTargetMac(const String& target, uint8_t out[6], bool& is_broadcast) {
+    const String normalized = A252ConfigStore::normalizeMac(target);
+    is_broadcast = false;
+    if (isBroadcastTarget(target)) {
+        is_broadcast = true;
+        return true;
+    }
+    if (normalized.isEmpty()) {
+        return false;
+    }
+    return A252ConfigStore::parseMac(normalized, out);
+}
 }
 
 EspNowBridge::EspNowBridge() {
@@ -89,19 +106,49 @@ const std::vector<String>& EspNowBridge::peers() const {
 
 bool EspNowBridge::sendJson(const String& target, const String& json_payload) {
     if (!ready_) {
+        Serial.printf("[EspNowBridge] send rejected: bridge not started\n");
+        tx_fail_++;
+        return false;
+    }
+
+    String normalized_target = target;
+    normalized_target.trim();
+    if (normalized_target.isEmpty()) {
+        Serial.printf("[EspNowBridge] send rejected: empty target\n");
+        tx_fail_++;
         return false;
     }
 
     if (json_payload.length() > kEspNowMaxPayloadBytes) {
         Serial.printf("[EspNowBridge] send rejected: payload too large=%u bytes\n",
                       static_cast<unsigned>(json_payload.length()));
+        tx_fail_++;
         return false;
     }
 
-    (void)target;
+    bool is_broadcast = false;
+    uint8_t target_mac[6] = {0};
+    if (!parseTargetMac(normalized_target, target_mac, is_broadcast)) {
+        Serial.printf("[EspNowBridge] send rejected: invalid target '%s'\n", normalized_target.c_str());
+        tx_fail_++;
+        return false;
+    }
 
-    const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    return sendToMac(broadcast_mac, json_payload);
+    if (!is_broadcast) {
+        const String normalized_source = A252ConfigStore::normalizeMac(normalized_target);
+        if (std::find(store_.peers.begin(), store_.peers.end(), normalized_source) == store_.peers.end()) {
+            Serial.printf("[EspNowBridge] send rejected: target not configured '%s'\n", normalized_source.c_str());
+            tx_fail_++;
+            return false;
+        }
+    }
+
+    if (is_broadcast) {
+        const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        return sendToMac(broadcast_mac, json_payload);
+    }
+
+    return sendToMac(target_mac, json_payload);
 }
 
 bool EspNowBridge::isReady() const {

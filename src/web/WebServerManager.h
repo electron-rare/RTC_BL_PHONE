@@ -23,6 +23,7 @@ public:
 
     void setStatusCallback(std::function<void(JsonObject)> callback);
     void setCommandExecutor(std::function<DispatchResponse(const String&)> callback);
+    void setCommandValidator(std::function<bool(const String&)> callback);
 
 private:
     AsyncWebServer server_;
@@ -33,11 +34,16 @@ private:
     bool status_cache_ready_;
     portMUX_TYPE status_cache_mux_;
     bool auth_enabled_;
+    bool auth_override_set_ = false;
     String auth_user_;
     String auth_pass_;
     std::function<void(JsonObject)> status_callback_;
     std::function<DispatchResponse(const String&)> command_executor_;
+    std::function<bool(const String&)> command_validator_;
 
+    static bool extractCommandId(const String& command_line, String& command_id);
+    static bool isCommandRegistered(const String& command_line,
+                                    const std::function<bool(const String&)>& validator);
     void registerRoutes();
     bool authenticateRequest(AsyncWebServerRequest* request) const;
     static bool extractJsonBody(AsyncWebServerRequest* request, JsonDocument& doc);

@@ -8,7 +8,8 @@
 
 namespace {
 constexpr char kFallbackApPrefix[] = "RTC_BL_A252";
-constexpr char kFallbackApPassword[] = "rtcblphone";
+// Open fallback AP by default to avoid lockout in local recovery mode.
+constexpr char kFallbackApPassword[] = "";
 constexpr uint8_t kFallbackApChannel = 6;
 constexpr uint8_t kFallbackApMaxConnections = 4;
 

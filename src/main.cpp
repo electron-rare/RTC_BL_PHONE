@@ -9,8 +9,10 @@
 #include "core/CommandDispatcher.h"
 #include "core/PlatformProfile.h"
 #include "props/EspNowBridge.h"
+#include "props/PropsBridge.h"
 #include "slic/Ks0835SlicController.h"
 #include "telephony/TelephonyService.h"
+#include "web/WebServerManager.h"
 #include "visual/ScopeDisplay.h"
 #include "wifi/WifiManagerInstance.h"
 #include "usb/UsbHostRuntime.h"
@@ -23,12 +25,21 @@ constexpr uint32_t kSerialBaud = 115200;
 constexpr int kAudioAmpEnablePin = 21;
 constexpr char kBootLogTag[] = "RTC_BOOT";
 constexpr bool kPrintHelpOnBoot = false;
+// API web access is intentionally left open by default to avoid hard lock on Wi-Fi.
+constexpr bool kWebAuthEnabledByDefault = false;
+
+#ifdef RTC_WEB_AUTH_DEV_DISABLE
+constexpr bool kWebAuthLocalDisableEnabled = true;
+#else
+constexpr bool kWebAuthLocalDisableEnabled = false;
+#endif
 
 BoardProfile g_profile = detectBoardProfile();
 FeatureMatrix g_features = getFeatureMatrix(g_profile);
 
 A252PinsConfig g_pins_cfg = A252ConfigStore::defaultPins();
 A252AudioConfig g_audio_cfg = A252ConfigStore::defaultAudio();
+MqttConfig g_mqtt_cfg = A252ConfigStore::defaultMqtt();
 EspNowPeerStore g_peer_store;
 EspNowCallMap g_espnow_call_map;
 String g_active_scene_id;
@@ -40,9 +51,11 @@ AudioEngine g_audio;
 Es8388Driver g_codec;
 TelephonyService g_telephony;
 EspNowBridge g_espnow;
+PropsBridge g_props_bridge;
 CommandDispatcher g_dispatcher;
 ScopeDisplay g_scope_display;
 String g_serial_line;
+WebServerManager g_web_server;
 
 DispatchResponse makeResponse(bool ok, const String& code) {
     DispatchResponse res;
@@ -453,10 +466,17 @@ void applyPcm5102ControlPins(const A252PinsConfig& pins_cfg) {
 }
 
 bool applyHardwareConfig() {
+    String pin_validation_error;
+    if (!A252ConfigStore::validatePins(g_pins_cfg, pin_validation_error)) {
+        Serial.printf("[RTC_BL_PHONE] invalid pins configuration: %s\n", pin_validation_error.c_str());
+        return false;
+    }
+
+    auto u8_pin = [](int pin) { return static_cast<uint8_t>(pin); };
     const SlicPins slic_pins = {
-        .pin_rm = static_cast<uint8_t>(g_pins_cfg.slic_rm),
-        .pin_fr = static_cast<uint8_t>(g_pins_cfg.slic_fr),
-        .pin_shk = static_cast<uint8_t>(g_pins_cfg.slic_shk),
+        .pin_rm = u8_pin(g_pins_cfg.slic_rm),
+        .pin_fr = u8_pin(g_pins_cfg.slic_fr),
+        .pin_shk = u8_pin(g_pins_cfg.slic_shk),
         .pin_line_enable = static_cast<int8_t>(-1),
         .pin_pd = static_cast<int8_t>(g_pins_cfg.slic_pd),
         .hook_active_high = g_pins_cfg.hook_active_high,
@@ -553,6 +573,10 @@ void fillStatusSnapshot(JsonObject root) {
 
     JsonObject espnow = root["espnow"].to<JsonObject>();
     g_espnow.statusToJson(espnow);
+
+    JsonObject mqtt = root["mqtt"].to<JsonObject>();
+    g_props_bridge.statusToJson(mqtt);
+    A252ConfigStore::mqttToJson(g_mqtt_cfg, mqtt["config"].to<JsonObject>());
 
     JsonObject config = root["config"].to<JsonObject>();
     A252ConfigStore::pinsToJson(g_pins_cfg, config["pins"].to<JsonObject>());
@@ -738,6 +762,41 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
     return true;
 }
 
+bool applyMqttPatch(JsonVariantConst patch, MqttConfig& target, String& error) {
+    MqttConfig next = target;
+    if (patch["enabled"].is<bool>()) {
+        next.enabled = patch["enabled"].as<bool>();
+    }
+    if (patch["host"].is<const char*>()) {
+        next.host = patch["host"].as<const char*>();
+    }
+    if (patch["port"].is<uint16_t>()) {
+        next.port = patch["port"].as<uint16_t>();
+    } else if (patch["port"].is<uint32_t>()) {
+        const uint32_t port = patch["port"].as<uint32_t>();
+        if (port > UINT16_MAX) {
+            error = "MQTT_CONFIG_SET invalid_port";
+            return false;
+        }
+        next.port = static_cast<uint16_t>(port);
+    }
+    if (patch["user"].is<const char*>()) {
+        next.user = patch["user"].as<const char*>();
+    }
+    if (patch["pass"].is<const char*>()) {
+        next.pass = patch["pass"].as<const char*>();
+    }
+    if (patch["base_topic"].is<const char*>()) {
+        next.base_topic = patch["base_topic"].as<const char*>();
+    }
+
+    if (!A252ConfigStore::validateMqtt(next, error)) {
+        return false;
+    }
+    target = next;
+    return true;
+}
+
 DispatchResponse applyEspNowCallMapSet(const String& args) {
     if (args.isEmpty()) {
         return makeResponse(false, "ESPNOW_CALL_MAP_SET invalid_json");
@@ -857,6 +916,26 @@ void registerCommands() {
         return jsonResponse(doc);
     });
 
+    g_dispatcher.registerCommand("WIFI_CONNECT", [](const String& args) {
+        String ssid;
+        String password;
+        if (!splitFirstToken(args, ssid, password)) {
+            return makeResponse(false, "WIFI_CONNECT invalid_args");
+        }
+        if (ssid.isEmpty()) {
+            return makeResponse(false, "WIFI_CONNECT invalid_ssid");
+        }
+        const bool ok = g_wifi.connect(ssid, password);
+        return makeResponse(ok, ok ? "WIFI_CONNECT" : "WIFI_CONNECT failed");
+    });
+
+    g_dispatcher.registerCommand("WIFI_SCAN", [](const String&) {
+        JsonDocument doc;
+        JsonArray networks = doc.to<JsonArray>();
+        g_wifi.scanToJson(networks, 20);
+        return jsonResponse(doc);
+    });
+
     g_dispatcher.registerCommand("WIFI_DISCONNECT", [](const String&) {
         g_wifi.disconnect(false);
         return makeResponse(true, "WIFI_DISCONNECT");
@@ -865,6 +944,112 @@ void registerCommands() {
     g_dispatcher.registerCommand("WIFI_RECONNECT", [](const String&) {
         const bool ok = g_wifi.reconnect();
         return makeResponse(ok, ok ? "WIFI_RECONNECT" : "WIFI_RECONNECT no_credentials");
+    });
+
+    g_dispatcher.registerCommand("MQTT_STATUS", [](const String&) {
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        g_props_bridge.statusToJson(root["bridge"].to<JsonObject>());
+        A252ConfigStore::mqttToJson(g_mqtt_cfg, root["config"].to<JsonObject>());
+        return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("MQTT_CONNECT", [](const String&) {
+        if (!g_mqtt_cfg.enabled) {
+            return makeResponse(false, "MQTT_CONNECT disabled");
+        }
+        const bool ok = g_props_bridge.connectNow();
+        return makeResponse(ok, ok ? "MQTT_CONNECT" : "MQTT_CONNECT failed");
+    });
+
+    g_dispatcher.registerCommand("MQTT_DISCONNECT", [](const String&) {
+        g_props_bridge.disconnect();
+        return makeResponse(true, "MQTT_DISCONNECT");
+    });
+
+    const auto mqttPublishHandler = [](const String& args) {
+        String topic;
+        String payload;
+        if (!splitFirstToken(args, topic, payload) || topic.isEmpty()) {
+            return makeResponse(false, "MQTT_PUBLISH invalid_args");
+        }
+        return makeResponse(g_props_bridge.publish(topic, payload), "MQTT_PUB");
+    };
+
+    g_dispatcher.registerCommand("MQTT_PUB", mqttPublishHandler);
+    g_dispatcher.registerCommand("MQTT_PUBLISH", mqttPublishHandler);
+
+    g_dispatcher.registerCommand("MQTT_CONFIG_SET", [](const String& args) {
+        if (args.isEmpty()) {
+            return makeResponse(false, "MQTT_CONFIG_SET invalid_json");
+        }
+
+        JsonDocument doc;
+        if (deserializeJson(doc, args) != DeserializationError::Ok || !doc.is<JsonObject>()) {
+            return makeResponse(false, "MQTT_CONFIG_SET invalid_json");
+        }
+
+        MqttConfig next = g_mqtt_cfg;
+        String error;
+        if (!applyMqttPatch(doc.as<JsonVariantConst>(), next, error)) {
+            return makeResponse(false, "MQTT_CONFIG_SET " + error);
+        }
+        if (!A252ConfigStore::saveMqtt(next, &error)) {
+            return makeResponse(false, "MQTT_CONFIG_SET " + error);
+        }
+        g_mqtt_cfg = next;
+        g_props_bridge.setConfig(g_mqtt_cfg);
+        if (!g_mqtt_cfg.enabled) {
+            return makeResponse(true, "MQTT_CONFIG_SET disabled");
+        }
+        const bool connected = g_props_bridge.connectNow();
+        return makeResponse(connected, connected ? "MQTT_CONFIG_SET" : "MQTT_CONFIG_SET connect_failed");
+    });
+
+    g_dispatcher.registerCommand("BT_STATUS", [](const String&) {
+        return makeResponse(false, "BT_STATUS unsupported");
+    });
+    g_dispatcher.registerCommand("BT_HFP_CONNECT", [](const String&) {
+        return makeResponse(false, "BT_HFP_CONNECT unsupported");
+    });
+    g_dispatcher.registerCommand("BT_HFP_DISCONNECT", [](const String&) {
+        return makeResponse(false, "BT_HFP_DISCONNECT unsupported");
+    });
+    g_dispatcher.registerCommand("BT_AUTO_RECONNECT_ON", [](const String&) {
+        return makeResponse(false, "BT_AUTO_RECONNECT_ON unsupported");
+    });
+    g_dispatcher.registerCommand("BT_AUTO_RECONNECT_OFF", [](const String&) {
+        return makeResponse(false, "BT_AUTO_RECONNECT_OFF unsupported");
+    });
+    g_dispatcher.registerCommand("BT_DISCOVERABLE_ON", [](const String&) {
+        return makeResponse(false, "BT_DISCOVERABLE_ON unsupported");
+    });
+    g_dispatcher.registerCommand("BT_DISCOVERABLE_OFF", [](const String&) {
+        return makeResponse(false, "BT_DISCOVERABLE_OFF unsupported");
+    });
+    g_dispatcher.registerCommand("BT_DIAL", [](const String&) {
+        return makeResponse(false, "BT_DIAL unsupported");
+    });
+    g_dispatcher.registerCommand("BT_REDIAL", [](const String&) {
+        return makeResponse(false, "BT_REDIAL unsupported");
+    });
+    g_dispatcher.registerCommand("BT_ANSWER", [](const String&) {
+        return makeResponse(false, "BT_ANSWER unsupported");
+    });
+    g_dispatcher.registerCommand("BT_HANGUP", [](const String&) {
+        return makeResponse(false, "BT_HANGUP unsupported");
+    });
+    g_dispatcher.registerCommand("BT_CALLS", [](const String&) {
+        return makeResponse(false, "BT_CALLS unsupported");
+    });
+    g_dispatcher.registerCommand("BT_PBAP_SYNC", [](const String&) {
+        return makeResponse(false, "BT_PBAP_SYNC unsupported");
+    });
+    g_dispatcher.registerCommand("BT_BLE_START", [](const String&) {
+        return makeResponse(false, "BT_BLE_START unsupported");
+    });
+    g_dispatcher.registerCommand("BT_BLE_STOP", [](const String&) {
+        return makeResponse(false, "BT_BLE_STOP unsupported");
     });
 
     g_dispatcher.registerCommand("UNLOCK", [](const String&) {
@@ -1309,6 +1494,17 @@ void pollSerial() {
     }
 }
 
+void configureCommandServer() {
+    g_web_server.setCommandExecutor(executeCommandLine);
+    g_web_server.setCommandValidator([](const String& command_id) {
+        return g_dispatcher.hasCommand(command_id);
+    });
+    g_web_server.setAuthEnabled(kWebAuthEnabledByDefault && !kWebAuthLocalDisableEnabled);
+    g_web_server.setStatusCallback([](JsonObject obj) {
+        fillStatusSnapshot(obj);
+    });
+}
+
 }  // namespace
 
 void setup() {
@@ -1336,6 +1532,7 @@ void setup() {
     A252ConfigStore::loadPins(g_pins_cfg);
     g_pins_cfg.slic_line = -1;
     A252ConfigStore::loadAudio(g_audio_cfg);
+    A252ConfigStore::loadMqtt(g_mqtt_cfg);
     A252ConfigStore::loadEspNowPeers(g_peer_store);
     initDefaultEspNowCallMap(g_espnow_call_map);
     if (!A252ConfigStore::loadEspNowCallMap(g_espnow_call_map)) {
@@ -1353,6 +1550,12 @@ void setup() {
     g_espnow.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
         processInboundBridgeCommand(source, payload);
     });
+    g_props_bridge.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
+        processInboundBridgeCommand(source, payload);
+    });
+    g_props_bridge.begin(g_mqtt_cfg);
+    configureCommandServer();
+    g_web_server.begin();
 
     Serial.printf("[RTC_BL_PHONE] Boot: profile=%s full_duplex=%s\n",
                   boardProfileToString(g_profile),
@@ -1363,8 +1566,11 @@ void setup() {
 }
 
 void loop() {
+    g_wifi.loop();
     g_telephony.tick();
     g_scope_display.tick();
+    g_web_server.handle();
+    g_props_bridge.tick();
     g_espnow.tick();
     pollSerial();
     delay(1);

@@ -1,9 +1,13 @@
 #include "web/WebServerManager.h"
 
+#ifdef USB_MSC_BOOT_ENABLE
+#include <FFat.h>
+#else
 #include <SPIFFS.h>
+#endif
 
 namespace {
-constexpr bool kForceAuthDisabled = true;
+constexpr bool kForceAuthDisabled = false;
 constexpr bool kEnableRealtimeEvents = true;
 
 String quoteArg(const String& value) {
@@ -22,17 +26,24 @@ WebServerManager::WebServerManager(uint16_t port)
       status_cache_json_(""),
       status_cache_ready_(false),
       status_cache_mux_(portMUX_INITIALIZER_UNLOCKED),
-      auth_enabled_(false),
+      auth_enabled_(true),
       auth_user_("admin"),
       auth_pass_("admin") {}
 
 void WebServerManager::begin() {
+#ifdef USB_MSC_BOOT_ENABLE
+    if (FFat.begin(true, "/usbmsc", 10, "usbmsc")) {
+        server_.serveStatic("/", FFat, "/webui/").setDefaultFile("index.html");
+    } else {
+        Serial.println("[WebServerManager] FFat mount failed (label usbmsc)");
+    }
+#else
     if (!SPIFFS.begin(true)) {
         Serial.println("[WebServerManager] SPIFFS mount failed");
     } else {
         server_.serveStatic("/", SPIFFS, "/webui/").setDefaultFile("index.html");
     }
-
+#endif
     registerRoutes();
     server_.begin();
     Serial.println("[WebServerManager] HTTP server started");
@@ -59,13 +70,22 @@ void WebServerManager::setAuthCredentials(const String& user, const String& pass
 void WebServerManager::setAuthEnabled(bool enabled) {
     if (kForceAuthDisabled) {
         auth_enabled_ = false;
+        auth_override_set_ = true;
         return;
     }
+    auth_override_set_ = true;
     auth_enabled_ = enabled;
 }
 
 bool WebServerManager::isAuthEnabled() const {
+    if (kForceAuthDisabled && !auth_override_set_) {
+        return false;
+    }
     return auth_enabled_;
+}
+
+void WebServerManager::setCommandValidator(std::function<bool(const String&)> callback) {
+    command_validator_ = std::move(callback);
 }
 
 void WebServerManager::setRateLimitMs(uint32_t rate_limit_ms) {
@@ -209,7 +229,7 @@ void WebServerManager::registerRoutes() {
             request->send(400, "application/json", "{\"error\":\"invalid topic\"}");
             return;
         }
-        handleDispatch(request, "MQTT_PUB " + topic + " " + payload);
+        handleDispatch(request, "MQTT_PUBLISH " + topic + " " + payload);
     });
 
     // ESP-NOW.
@@ -253,7 +273,11 @@ void WebServerManager::registerRoutes() {
             request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
             return;
         }
-        const String mac = doc["mac"] | "broadcast";
+        const String mac = doc["mac"] | "";
+        if (!isValidInput(mac, 32)) {
+            request->send(400, "application/json", "{\"error\":\"invalid mac\"}");
+            return;
+        }
         String payload;
         JsonVariantConst payload_variant = doc["payload"].as<JsonVariantConst>();
         bool already_enveloped = false;
@@ -394,6 +418,62 @@ bool WebServerManager::isEffectCommand(const String& command_line) {
            token == "BT_HANGUP";
 }
 
+bool WebServerManager::extractCommandId(const String& command_line, String& command_id) {
+    command_id = "";
+    String line = command_line;
+    line.trim();
+    if (line.isEmpty()) {
+        return false;
+    }
+
+    int sep = -1;
+    const int len = line.length();
+    bool in_quote = false;
+    bool escaped = false;
+    for (int i = 0; i < len; ++i) {
+        const char c = line[i];
+        if (in_quote) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                in_quote = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_quote = true;
+            continue;
+        }
+        if (c == ' ') {
+            sep = i;
+            break;
+        }
+    }
+
+    if (sep < 0) {
+        command_id = line;
+    } else {
+        command_id = line.substring(0, sep);
+    }
+    command_id.trim();
+    command_id.toUpperCase();
+    return !command_id.isEmpty();
+}
+
+bool WebServerManager::isCommandRegistered(const String& command_line,
+                                           const std::function<bool(const String&)>& validator) {
+    if (!validator) {
+        return true;
+    }
+    String command_id;
+    if (!extractCommandId(command_line, command_id)) {
+        return false;
+    }
+    return validator(command_id);
+}
+
 void WebServerManager::refreshStatusCache() {
     if (!status_callback_) {
         portENTER_CRITICAL(&status_cache_mux_);
@@ -468,14 +548,24 @@ void WebServerManager::publishDispatchEvent(const String& command_line, const Di
 }
 
 void WebServerManager::handleDispatch(AsyncWebServerRequest* request,
-                                      const String& command_line,
-                                      uint16_t success_code,
-                                      uint16_t error_code) {
+                                     const String& command_line,
+                                     uint16_t success_code,
+                                     uint16_t error_code) {
     if (!authenticateRequest(request)) {
         return;
     }
     if (!command_executor_) {
         request->send(500, "application/json", "{\"error\":\"command executor not configured\"}");
+        return;
+    }
+
+    if (!isCommandRegistered(command_line, command_validator_)) {
+        JsonDocument invalid;
+        invalid["ok"] = false;
+        invalid["error"] = "unsupported_command";
+        invalid["command"] = command_line;
+        invalid["path"] = request->url();
+        request->send(400, "application/json", toJsonString(invalid));
         return;
     }
 
