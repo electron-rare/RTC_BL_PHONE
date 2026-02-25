@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -87,12 +88,39 @@ def _find_usbmsc_partition(partitions_path: Path) -> tuple[int, int]:
     raise RuntimeError("Could not find 'usbmsc' partition in partition table.")
 
 
-def _build_usbmsc_image(mkfatfs: str, source_dir: Path, image_path: Path, image_size: int) -> None:
-    if not source_dir.is_dir():
-        raise RuntimeError(f"WebUI folder not found: {source_dir}")
-    if image_path.exists():
-        image_path.unlink()
-    _run([mkfatfs, "-c", str(source_dir), "-t", "fatfs", "-s", str(image_size), str(image_path)])
+def _build_usbmsc_image(
+    mkfatfs: str, webui_dir: Path, audio_dir: Path, image_path: Path, image_size: int
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="usbmsc_", dir=None) as staging_root:
+        staging_dir = Path(staging_root)
+
+        if webui_dir.is_dir():
+            shutil.copytree(webui_dir, staging_dir / "webui")
+        else:
+            raise RuntimeError(f"WebUI folder not found: {webui_dir}")
+
+        if audio_dir.is_dir():
+            for item in audio_dir.iterdir():
+                target = staging_dir / item.name
+                if item.is_dir():
+                    if target.exists():
+                        # Merge directories when both roots share a path.
+                        for sub in item.rglob("*"):
+                            rel = sub.relative_to(item)
+                            if sub.is_dir():
+                                (target / rel).mkdir(parents=True, exist_ok=True)
+                            else:
+                                target.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(sub, target / rel)
+                    else:
+                        shutil.copytree(item, target)
+                elif item.is_file():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, target)
+
+        if image_path.exists():
+            image_path.unlink()
+        _run([mkfatfs, "-c", str(staging_dir), "-t", "fatfs", "-s", str(image_size), str(image_path)])
 
 
 def _upload_usbmsc_image(
@@ -149,10 +177,11 @@ def _target_upload_usbmsc(source, target, env):
         raise RuntimeError("USB-MSC partition has invalid size.")
 
     webui_dir = project_dir / "data" / "webui"
+    audio_dir = project_dir / "data" / "audio"
     image_path = build_dir / "usbmsc.bin"
 
     mkfatfs = _find_tool("mkfatfs", project_dir, env)
-    _build_usbmsc_image(mkfatfs, webui_dir, image_path, partition_size)
+    _build_usbmsc_image(mkfatfs, webui_dir, audio_dir, image_path, partition_size)
     print(
         "[upload_usbmsc] built image "
         f"{image_path} ({image_path.stat().st_size} bytes, partition 0x{partition_offset:06x} / 0x{partition_size:06x})"

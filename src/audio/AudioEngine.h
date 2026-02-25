@@ -95,7 +95,7 @@ private:
     void stopTask();
     bool lockI2s() const;
     void unlockI2s() const;
-    bool ensureSdMounted();
+    bool ensureAudioStorageMounted();
     void stopPlaybackFile();
     bool prepareWavPlayback(File& file, const char* path);
     bool streamPlaybackChunk();
@@ -110,8 +110,10 @@ private:
     float dial_tone_gain_ = 0.0f;
     float dial_tone_phase_ = 0.0f;
     uint32_t next_dial_tone_push_ms_ = 0;
-    bool sd_mount_attempted_ = false;
-    bool sd_ready_ = false;
+    bool audio_fs_mount_attempted_ = false;
+    bool audio_fs_ready_ = false;
+    bool audio_fs_is_fat_ = false;
+    fs::FS* audio_fs_ = nullptr;
     File playback_file_;
     String playback_path_;
     uint32_t playback_data_remaining_ = 0;

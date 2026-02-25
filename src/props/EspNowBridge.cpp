@@ -98,16 +98,10 @@ bool EspNowBridge::sendJson(const String& target, const String& json_payload) {
         return false;
     }
 
-    if (target == "broadcast" || target == "BROADCAST") {
-        const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-        return sendToMac(broadcast_mac, json_payload);
-    }
+    (void)target;
 
-    uint8_t mac[6] = {0};
-    if (!A252ConfigStore::parseMac(target, mac)) {
-        return false;
-    }
-    return sendToMac(mac, json_payload);
+    const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    return sendToMac(broadcast_mac, json_payload);
 }
 
 bool EspNowBridge::isReady() const {

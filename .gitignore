@@ -426,3 +426,6 @@ coverage/
 .history/
 *.swp
 *~
+
+# Project data
+data/audio/

@@ -1,5 +1,6 @@
 #include "audio/AudioEngine.h"
 
+#include <FFat.h>
 #include <SD_MMC.h>
 #include <esp_dsp.h>
 
@@ -189,17 +190,38 @@ void AudioEngine::unlockI2s() const {
     }
 }
 
-bool AudioEngine::ensureSdMounted() {
-    if (sd_mount_attempted_) {
-        return sd_ready_;
+bool AudioEngine::ensureAudioStorageMounted() {
+    if (audio_fs_mount_attempted_) {
+        return audio_fs_ready_;
     }
 
-    sd_mount_attempted_ = true;
-    sd_ready_ = SD_MMC.begin();
-    if (!sd_ready_) {
-        Serial.println("[AudioEngine] SD_MMC mount failed");
+    audio_fs_mount_attempted_ = true;
+    audio_fs_ready_ = false;
+    audio_fs_is_fat_ = false;
+    audio_fs_ = nullptr;
+
+#ifdef USB_MSC_BOOT_ENABLE
+    audio_fs_is_fat_ = FFat.begin(true, "/usbmsc", 10, "usbmsc");
+    if (audio_fs_is_fat_) {
+        audio_fs_ = &FFat;
+        audio_fs_ready_ = true;
+    } else {
+        Serial.println("[AudioEngine] FFat begin failed, fallback SD_MMC");
     }
-    return sd_ready_;
+#else
+    (void)audio_fs_is_fat_;
+#endif
+
+    if (!audio_fs_ready_) {
+        audio_fs_ready_ = SD_MMC.begin();
+        if (!audio_fs_ready_) {
+            Serial.println("[AudioEngine] SD_MMC begin failed");
+            return false;
+        }
+        audio_fs_ = &SD_MMC;
+    }
+
+    return audio_fs_ready_;
 }
 
 void AudioEngine::stopPlaybackFile() {
@@ -584,16 +606,18 @@ bool AudioEngine::playFile(const char* path) {
     if (!driver_installed_ || path == nullptr || path[0] == '\0') {
         return false;
     }
-    if (!ensureSdMounted()) {
+    if (!ensureAudioStorageMounted() || audio_fs_ == nullptr) {
         return false;
     }
 
     stopDialTone();
     stopPlaybackFile();
 
-    playback_file_ = SD_MMC.open(path, FILE_READ);
+    playback_file_ = audio_fs_->open(path, FILE_READ);
     if (!playback_file_) {
-        Serial.printf("[AudioEngine] sd file not found: %s\n", path);
+        Serial.printf("[AudioEngine] playback file not found on %s: %s\n",
+                      audio_fs_is_fat_ ? "FFAT" : "SD_MMC",
+                      path);
         return false;
     }
 
@@ -610,7 +634,7 @@ bool AudioEngine::playFile(const char* path) {
     wav_copy_.begin(wav_stream_, playback_file_);
     playback_path_ = path;
     playing_ = true;
-    Serial.printf("[AudioEngine] play sd wav (audio-tools): %s\n", path);
+    Serial.printf("[AudioEngine] play wav/mp3 from %s: %s\n", audio_fs_is_fat_ ? "FFAT" : "SD_MMC", path);
     return true;
 }
 
@@ -820,7 +844,7 @@ bool AudioEngine::isPlaying() const {
 }
 
 bool AudioEngine::isSdReady() const {
-    return sd_ready_;
+    return audio_fs_ready_;
 }
 
 AudioRuntimeMetrics AudioEngine::metrics() const {

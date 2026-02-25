@@ -30,7 +30,10 @@ FeatureMatrix g_features = getFeatureMatrix(g_profile);
 A252PinsConfig g_pins_cfg = A252ConfigStore::defaultPins();
 A252AudioConfig g_audio_cfg = A252ConfigStore::defaultAudio();
 EspNowPeerStore g_peer_store;
+EspNowCallMap g_espnow_call_map;
 String g_active_scene_id;
+String g_pending_espnow_call_audio_path;
+bool g_pending_espnow_call = false;
 
 Ks0835SlicController g_slic;
 AudioEngine g_audio;
@@ -150,6 +153,116 @@ bool extractBridgeCommand(JsonVariantConst payload, String& out_cmd, uint8_t dep
     }
 
     return false;
+}
+
+String sanitizeAudioPath(const String& raw_path) {
+    String path = raw_path;
+    path.trim();
+    if (path.isEmpty()) {
+        return "";
+    }
+
+    if (path.length() >= 2U && path[0] == '\"' && path[path.length() - 1U] == '\"') {
+        path = path.substring(1U, path.length() - 1U);
+    }
+    path.trim();
+    if (path.isEmpty()) {
+        return "";
+    }
+
+    if (path.startsWith("{") || path.startsWith("[") || path == "null") {
+        return "";
+    }
+
+    if (!path.startsWith("/")) {
+        path = "/" + path;
+    }
+    path.toLowerCase();
+    if (!path.endsWith(".wav") && !path.endsWith(".mp3")) {
+        path += ".wav";
+    }
+    return path;
+}
+
+void initDefaultEspNowCallMap(EspNowCallMap& out_map) {
+    out_map.clear();
+    out_map.push_back({"LA_OK", "/la_ok.wav"});
+    out_map.push_back({"LA_BUSY", "/la_busy.wav"});
+}
+
+String resolveEspNowCallAudioPath(const String& message, const String& args) {
+    String normalized_message = message;
+    normalized_message.trim();
+    normalized_message.toUpperCase();
+
+    if (!args.isEmpty()) {
+        return sanitizeAudioPath(args);
+    }
+
+    for (const EspNowCallMapEntry& entry : g_espnow_call_map) {
+        if (!entry.keyword.equalsIgnoreCase(normalized_message)) {
+            continue;
+        }
+        const String mapped = sanitizeAudioPath(entry.path);
+        if (!mapped.isEmpty()) {
+            return mapped;
+        }
+    }
+
+    if (normalized_message.isEmpty()) {
+        return "";
+    }
+    normalized_message.toLowerCase();
+
+    return "/" + normalized_message + ".wav";
+}
+
+DispatchResponse makeEspNowCallResponse(bool ok, const String& message, const String& path, bool pending) {
+    DispatchResponse res = makeResponse(ok, ok ? (pending ? "ESPNOW_CALL_RINGING" : "ESPNOW_CALL_PLAY") : "ESPNOW_CALL_FAILED");
+    JsonDocument payload;
+    payload["call"] = message;
+    payload["audio"] = path;
+    payload["pending"] = pending;
+    res.json = "";
+    res.raw = "";
+    res.ok = ok;
+    String json;
+    serializeJson(payload, json);
+    res.json = json;
+    return res;
+}
+
+bool handleIncomingEspNowCallCommand(const String& command_line, DispatchResponse& out) {
+    String keyword;
+    String args;
+    if (!splitFirstToken(command_line, keyword, args)) {
+        return false;
+    }
+
+    keyword.trim();
+    keyword.toUpperCase();
+
+    if (!keyword.startsWith("LA_")) {
+        return false;
+    }
+
+    if (g_telephony.state() == TelephonyState::OFF_HOOK || g_telephony.state() == TelephonyState::PLAYING_MESSAGE) {
+        out = makeResponse(false, "ESPNOW_CALL_BUSY");
+        return true;
+    }
+
+    const String audio_path = resolveEspNowCallAudioPath(keyword, args);
+    if (audio_path.isEmpty()) {
+        out = makeResponse(false, "ESPNOW_CALL_NO_AUDIO");
+        return true;
+    }
+
+    g_pending_espnow_call_audio_path = audio_path;
+    g_pending_espnow_call = true;
+    g_telephony.triggerIncomingRing();
+
+    out = makeEspNowCallResponse(true, keyword, audio_path, true);
+    return true;
 }
 
 bool buildEspNowEnvelopeCommand(JsonVariantConst payload,
@@ -372,8 +485,20 @@ bool applyHardwareConfig() {
         return false;
     });
     g_telephony.setAnswerCallback([]() {
-        Serial.println("[Telephony] answer callback disabled");
-        return false;
+        if (!g_pending_espnow_call || g_pending_espnow_call_audio_path.isEmpty()) {
+            Serial.println("[Telephony] answer callback disabled");
+            return false;
+        }
+
+        const String audio_path = g_pending_espnow_call_audio_path;
+        g_pending_espnow_call_audio_path = "";
+        g_pending_espnow_call = false;
+
+        const bool ok = g_audio.playFile(audio_path.c_str());
+        Serial.printf("[Telephony] answer callback -> play '%s' ok=%s\n",
+                      audio_path.c_str(),
+                      ok ? "true" : "false");
+        return ok;
     });
 
     Serial.printf("[RTC_BL_PHONE] HW init slic=%s codec=%s audio=%s\n",
@@ -415,6 +540,8 @@ void fillStatusSnapshot(JsonObject root) {
     JsonObject telephony = root["telephony"].to<JsonObject>();
     telephony["state"] = telephonyStateToString(g_telephony.state());
     telephony["hook"] = g_slic.isHookOff() ? "OFF_HOOK" : "ON_HOOK";
+    telephony["pending_espnow_call"] = g_pending_espnow_call;
+    telephony["pending_espnow_call_audio"] = g_pending_espnow_call_audio_path;
 
     appendAudioMetrics(root);
 
@@ -430,6 +557,7 @@ void fillStatusSnapshot(JsonObject root) {
     JsonObject config = root["config"].to<JsonObject>();
     A252ConfigStore::pinsToJson(g_pins_cfg, config["pins"].to<JsonObject>());
     A252ConfigStore::audioToJson(g_audio_cfg, config["audio"].to<JsonObject>());
+    A252ConfigStore::espNowCallMapToJson(g_espnow_call_map, config["espnow_call_map"].to<JsonObject>());
 
     JsonArray peers = config["espnow_peers"].to<JsonArray>();
     A252ConfigStore::peersToJson(g_peer_store, peers);
@@ -574,15 +702,28 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
     if (patch["adc_fft_enabled"].is<bool>()) {
         next.adc_fft_enabled = patch["adc_fft_enabled"].as<bool>();
     }
-    if (patch["adc_dsp_fft_downsample"].is<uint8_t>()) {
-        next.adc_dsp_fft_downsample = patch["adc_dsp_fft_downsample"].as<uint8_t>();
-    } else if (patch["adc_dsp_fft_downsample"].is<uint16_t>() && patch["adc_dsp_fft_downsample"].as<uint16_t>() <= 255U) {
+    if (patch["adc_dsp_fft_downsample"].is<int>()) {
+        const int ds = patch["adc_dsp_fft_downsample"].as<int>();
+        if (ds >= 0 && ds <= 255) {
+            next.adc_dsp_fft_downsample = static_cast<uint8_t>(ds);
+        }
+    } else if (patch["adc_dsp_fft_downsample"].is<uint16_t>()) {
         next.adc_dsp_fft_downsample = static_cast<uint8_t>(patch["adc_dsp_fft_downsample"].as<uint16_t>());
     }
-    if (patch["adc_fft_ignore_low_bin"].is<uint16_t>()) {
+    if (patch["adc_fft_ignore_low_bin"].is<int>()) {
+        const int low_bin = patch["adc_fft_ignore_low_bin"].as<int>();
+        if (low_bin >= 0 && low_bin <= static_cast<int>(UINT16_MAX)) {
+            next.adc_fft_ignore_low_bin = static_cast<uint16_t>(low_bin);
+        }
+    } else if (patch["adc_fft_ignore_low_bin"].is<uint16_t>()) {
         next.adc_fft_ignore_low_bin = patch["adc_fft_ignore_low_bin"].as<uint16_t>();
     }
-    if (patch["adc_fft_ignore_high_bin"].is<uint16_t>()) {
+    if (patch["adc_fft_ignore_high_bin"].is<int>()) {
+        const int high_bin = patch["adc_fft_ignore_high_bin"].as<int>();
+        if (high_bin >= 0 && high_bin <= static_cast<int>(UINT16_MAX)) {
+            next.adc_fft_ignore_high_bin = static_cast<uint16_t>(high_bin);
+        }
+    } else if (patch["adc_fft_ignore_high_bin"].is<uint16_t>()) {
         next.adc_fft_ignore_high_bin = patch["adc_fft_ignore_high_bin"].as<uint16_t>();
     }
     if (patch["route"].is<const char*>()) {
@@ -595,6 +736,63 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
     }
     target = next;
     return true;
+}
+
+DispatchResponse applyEspNowCallMapSet(const String& args) {
+    if (args.isEmpty()) {
+        return makeResponse(false, "ESPNOW_CALL_MAP_SET invalid_json");
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, args) != DeserializationError::Ok || !doc.is<JsonObject>()) {
+        return makeResponse(false, "ESPNOW_CALL_MAP_SET invalid_json");
+    }
+
+    JsonObject obj = doc.as<JsonObject>();
+    EspNowCallMap next;
+    for (JsonPair pair : obj) {
+        if (!pair.value().is<const char*>()) {
+            continue;
+        }
+
+        String keyword = pair.key().c_str();
+        keyword.trim();
+        keyword.toUpperCase();
+        if (keyword.isEmpty()) {
+            continue;
+        }
+        if (!keyword.startsWith("LA_")) {
+            continue;
+        }
+
+        const String path = sanitizeAudioPath(pair.value().as<const char*>());
+        if (path.isEmpty()) {
+            continue;
+        }
+
+        bool updated = false;
+        for (EspNowCallMapEntry& entry : next) {
+            if (entry.keyword.equalsIgnoreCase(keyword)) {
+                entry.path = path;
+                updated = true;
+                break;
+            }
+        }
+        if (!updated) {
+            next.push_back({keyword, path});
+        }
+    }
+
+    if (next.empty()) {
+        return makeResponse(false, "ESPNOW_CALL_MAP_SET no_valid_entries");
+    }
+
+    String save_error;
+    if (!A252ConfigStore::saveEspNowCallMap(next, &save_error)) {
+        return makeResponse(false, "ESPNOW_CALL_MAP_SET save_failed" + (save_error.isEmpty() ? "" : String(" ") + save_error));
+    }
+    g_espnow_call_map = next;
+    return makeResponse(true, "ESPNOW_CALL_MAP_SET");
 }
 
 DispatchResponse executeCommandLine(const String& line) {
@@ -847,6 +1045,25 @@ void registerCommands() {
         return makeResponse(g_espnow.sendJson(target, payload), "ESPNOW_SEND");
     });
 
+    g_dispatcher.registerCommand("ESPNOW_CALL_MAP_GET", [](const String&) {
+        JsonDocument doc;
+        JsonObject map = doc.to<JsonObject>();
+        A252ConfigStore::espNowCallMapToJson(g_espnow_call_map, map);
+        return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("ESPNOW_CALL_MAP_SET", [](const String& args) {
+        return applyEspNowCallMapSet(args);
+    });
+
+    g_dispatcher.registerCommand("ESPNOW_CALL_MAP_RESET", [](const String&) {
+        initDefaultEspNowCallMap(g_espnow_call_map);
+        if (!A252ConfigStore::saveEspNowCallMap(g_espnow_call_map)) {
+            return makeResponse(false, "ESPNOW_CALL_MAP_RESET save_failed");
+        }
+        return makeResponse(true, "ESPNOW_CALL_MAP_RESET");
+    });
+
     g_dispatcher.registerCommand("SLIC_CONFIG_GET", [](const String&) {
         JsonDocument doc;
         A252ConfigStore::pinsToJson(g_pins_cfg, doc.to<JsonObject>());
@@ -936,7 +1153,66 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
         return;
     }
 
-    const DispatchResponse result = executeCommandLine(cmd);
+    DispatchResponse result;
+    if (handleIncomingEspNowCallCommand(cmd, result)) {
+        if (is_envelope_v2 && request_ack && isMacAddressString(source)) {
+            JsonDocument response;
+            response["msg_id"] = request_id.isEmpty() ? String(millis()) : request_id;
+            response["seq"] = request_seq;
+            response["type"] = "ack";
+            response["ack"] = true;
+            JsonObject ack_payload = response["payload"].to<JsonObject>();
+            ack_payload["ok"] = result.ok;
+            ack_payload["code"] = result.code;
+            ack_payload["error"] = result.ok ? "" : (result.code.isEmpty() ? result.raw : result.code);
+
+            if (!result.json.isEmpty()) {
+                JsonDocument parsed;
+                if (deserializeJson(parsed, result.json) == DeserializationError::Ok) {
+                    ack_payload["data"].set(parsed.as<JsonVariantConst>());
+                } else {
+                    ack_payload["data_raw"] = result.json;
+                }
+            } else if (!result.raw.isEmpty()) {
+                ack_payload["data_raw"] = result.raw;
+            }
+
+            String response_payload;
+            serializeJson(response, response_payload);
+            g_espnow.sendJson(source, response_payload);
+            return;
+        }
+
+        if (!is_rtcbl_v1 || !isMacAddressString(source)) {
+            return;
+        }
+
+        JsonDocument response;
+        response["proto"] = "rtcbl/1";
+        response["id"] = request_id;
+        response["ok"] = result.ok;
+        response["code"] = result.code;
+        response["error"] = result.ok ? "" : (result.code.isEmpty() ? result.raw : result.code);
+
+        if (!result.json.isEmpty()) {
+            JsonDocument parsed;
+            if (deserializeJson(parsed, result.json) == DeserializationError::Ok) {
+                JsonVariant data = response["data"];
+                data.set(parsed.as<JsonVariantConst>());
+            } else {
+                response["data_raw"] = result.json;
+            }
+        } else if (!result.raw.isEmpty()) {
+            response["data_raw"] = result.raw;
+        }
+
+        String response_payload;
+        serializeJson(response, response_payload);
+        g_espnow.sendJson(source, response_payload);
+        return;
+    }
+
+    result = executeCommandLine(cmd);
 
     if (is_envelope_v2 && request_ack && isMacAddressString(source)) {
         JsonDocument response;
@@ -1061,6 +1337,11 @@ void setup() {
     g_pins_cfg.slic_line = -1;
     A252ConfigStore::loadAudio(g_audio_cfg);
     A252ConfigStore::loadEspNowPeers(g_peer_store);
+    initDefaultEspNowCallMap(g_espnow_call_map);
+    if (!A252ConfigStore::loadEspNowCallMap(g_espnow_call_map)) {
+        initDefaultEspNowCallMap(g_espnow_call_map);
+        A252ConfigStore::saveEspNowCallMap(g_espnow_call_map);
+    }
 
     pinMode(kAudioAmpEnablePin, OUTPUT);
     digitalWrite(kAudioAmpEnablePin, LOW);

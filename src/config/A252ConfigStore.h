@@ -44,6 +44,13 @@ struct A252AudioConfig {
     String route = "rtc";
 };
 
+struct EspNowCallMapEntry {
+    String keyword;
+    String path;
+};
+
+using EspNowCallMap = std::vector<EspNowCallMapEntry>;
+
 struct MqttConfig {
     bool enabled = false;
     String host;
@@ -74,6 +81,8 @@ public:
 
     static bool loadEspNowPeers(EspNowPeerStore& out);
     static bool saveEspNowPeers(const EspNowPeerStore& store, String* error = nullptr);
+    static bool loadEspNowCallMap(EspNowCallMap& out);
+    static bool saveEspNowCallMap(const EspNowCallMap& map, String* error = nullptr);
 
     static bool validatePins(const A252PinsConfig& cfg, String& error);
     static bool validateAudio(const A252AudioConfig& cfg, String& error);
@@ -83,6 +92,7 @@ public:
     static void audioToJson(const A252AudioConfig& cfg, JsonObject obj);
     static void mqttToJson(const MqttConfig& cfg, JsonObject obj, bool include_secret = false);
     static void peersToJson(const EspNowPeerStore& store, JsonArray arr);
+    static void espNowCallMapToJson(const EspNowCallMap& map, JsonObject obj);
 
     static String normalizeMac(const String& value);
     static bool parseMac(const String& value, uint8_t out[6]);

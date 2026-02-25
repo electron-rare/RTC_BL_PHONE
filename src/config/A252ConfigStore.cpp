@@ -11,6 +11,7 @@ constexpr const char* kPinsNs = "a252-pins";
 constexpr const char* kAudioNs = "a252-audio";
 constexpr const char* kMqttNs = "mqtt";
 constexpr const char* kEspNowNs = "espnow";
+constexpr const char* kEspNowCallMapNs = "espnow-call";
 
 bool saveString(Preferences& prefs, const char* key, const String& value) {
     return prefs.putString(key, value) >= 0;
@@ -23,6 +24,40 @@ bool loadJsonArray(const String& raw, JsonDocument& doc) {
     }
     const auto err = deserializeJson(doc, raw);
     return err == DeserializationError::Ok && doc.is<JsonArray>();
+}
+
+bool loadJsonObject(const String& raw, JsonDocument& doc) {
+    if (raw.isEmpty()) {
+        doc.to<JsonObject>();
+        return true;
+    }
+    const auto err = deserializeJson(doc, raw);
+    return err == DeserializationError::Ok && doc.is<JsonObject>();
+}
+
+String normalizeEspNowCallKeyword(const String& keyword) {
+    String normalized = keyword;
+    normalized.trim();
+    normalized.toUpperCase();
+    return normalized;
+}
+
+void mergeCallMapEntry(EspNowCallMap& map, const String& keyword, const String& path) {
+    const String normalized_keyword = normalizeEspNowCallKeyword(keyword);
+    if (normalized_keyword.isEmpty()) {
+        return;
+    }
+    if (path.isEmpty()) {
+        return;
+    }
+
+    for (EspNowCallMapEntry& entry : map) {
+        if (entry.keyword == normalized_keyword) {
+            entry.path = path;
+            return;
+        }
+    }
+    map.push_back({normalized_keyword, path});
 }
 
 }  // namespace
@@ -284,6 +319,65 @@ bool A252ConfigStore::loadEspNowPeers(EspNowPeerStore& out) {
         }
     }
     return true;
+}
+
+bool A252ConfigStore::loadEspNowCallMap(EspNowCallMap& out) {
+    out.clear();
+    Preferences prefs;
+    if (!prefs.begin(kEspNowCallMapNs, false)) {
+        return false;
+    }
+    const String raw = prefs.isKey("mappings") ? prefs.getString("mappings", "{}") : String("{}");
+    prefs.end();
+
+    JsonDocument doc;
+    if (!loadJsonObject(raw, doc)) {
+        return false;
+    }
+
+    JsonObject obj = doc.as<JsonObject>();
+    for (JsonPair item : obj) {
+        if (!item.value().is<const char*>()) {
+            continue;
+        }
+        const String key = item.key().c_str();
+        mergeCallMapEntry(out, key, item.value().as<const char*>());
+    }
+    return true;
+}
+
+bool A252ConfigStore::saveEspNowCallMap(const EspNowCallMap& map, String* error) {
+    JsonDocument doc;
+    JsonObject obj = doc.to<JsonObject>();
+    for (const EspNowCallMapEntry& entry : map) {
+        if (entry.keyword.isEmpty() || entry.path.isEmpty()) {
+            continue;
+        }
+        obj[entry.keyword] = entry.path;
+    }
+
+    String raw;
+    serializeJson(obj, raw);
+
+    Preferences prefs;
+    if (!prefs.begin(kEspNowCallMapNs, false)) {
+        if (error) {
+            *error = "nvs_open_failed";
+        }
+        return false;
+    }
+    const bool ok = prefs.putString("mappings", raw) >= 0;
+    prefs.end();
+    return ok;
+}
+
+void A252ConfigStore::espNowCallMapToJson(const EspNowCallMap& map, JsonObject obj) {
+    for (const EspNowCallMapEntry& entry : map) {
+        if (entry.keyword.isEmpty() || entry.path.isEmpty()) {
+            continue;
+        }
+        obj[entry.keyword] = entry.path;
+    }
 }
 
 bool A252ConfigStore::saveEspNowPeers(const EspNowPeerStore& store, String* error) {

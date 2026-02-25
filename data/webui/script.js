@@ -460,14 +460,13 @@ function bindEvents() {
 
   document.getElementById("espnowSendForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const target = document.getElementById("espnowTarget").value.trim();
     const payloadRaw = document.getElementById("espnowPayload").value;
     const payload = parsePayloadValue(payloadRaw);
     try {
       const result = await requestJson("/api/network/espnow/send", {
         method: "POST",
         headers: jsonHeaders(),
-        body: JSON.stringify({ mac: target, payload }),
+        body: JSON.stringify({ payload }),
       });
       setJson("actionResult", result);
       await refreshNetwork();
