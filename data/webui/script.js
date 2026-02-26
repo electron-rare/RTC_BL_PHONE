@@ -87,19 +87,15 @@ function applyStatusSnapshot(status) {
   const telephonyState = status.telephony?.state || "n/a";
   const hook = status.telephony?.hook || "n/a";
   const wifiState = status.wifi?.state || "n/a";
-  const mqttConnected = status.mqtt?.connected ? "on" : "off";
   const peers = status.espnow?.peer_count ?? 0;
   const liveState = realtimeConnected ? "live=on" : "live=off";
   line.textContent =
     `board=${status.board_profile || "n/a"} telephony=${telephonyState} hook=${hook} ` +
-    `wifi=${wifiState} mqtt=${mqttConnected} espnow_peers=${peers} ${liveState}`;
+    `wifi=${wifiState} espnow_peers=${peers} ${liveState}`;
 
   setJson("statusJson", status);
   if (status.wifi) {
     setJson("wifiJson", status.wifi);
-  }
-  if (status.mqtt) {
-    setJson("mqttJson", status.mqtt);
   }
   if (status.espnow) {
     setJson("espnowJson", status.espnow);
@@ -184,20 +180,15 @@ async function refreshStatus() {
 
 async function refreshConfig() {
   try {
-    const [pins, audio, mqtt] = await Promise.all([
+    const [pins, audio] = await Promise.all([
       requestJson("/api/config/pins"),
       requestJson("/api/config/audio"),
-      requestJson("/api/config/mqtt"),
     ]);
-    setJson("configJson", { pins, audio, mqtt });
+    setJson("configJson", { pins, audio });
     const audioInput = document.getElementById("audioConfigInput");
-    const mqttInput = document.getElementById("mqttConfigInput");
     const pinsInput = document.getElementById("pinsConfigInput");
     if (audioInput) {
       audioInput.value = JSON.stringify(audio, null, 2);
-    }
-    if (mqttInput) {
-      mqttInput.value = JSON.stringify(mqtt.config || mqtt, null, 2);
     }
     if (pinsInput) {
       pinsInput.value = JSON.stringify(pins, null, 2);
@@ -209,20 +200,17 @@ async function refreshConfig() {
 
 async function refreshNetwork() {
   try {
-    const [wifi, mqtt, espnow, peers] = await Promise.all([
+    const [wifi, espnow, peers] = await Promise.all([
       requestJson("/api/network/wifi"),
-      requestJson("/api/network/mqtt"),
       requestJson("/api/network/espnow"),
       requestJson("/api/network/espnow/peer"),
     ]);
     setJson("wifiJson", wifi);
-    setJson("mqttJson", mqtt);
     setJson("espnowJson", espnow);
     setJson("espnowPeersJson", peers);
   } catch (error) {
     const err = { error: error.message };
     setJson("wifiJson", err);
-    setJson("mqttJson", err);
     setJson("espnowJson", err);
     setJson("espnowPeersJson", err);
   }
@@ -260,21 +248,6 @@ function bindEvents() {
       });
       setJson("actionResult", result);
       await Promise.all([refreshConfig(), refreshStatus()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("applyMqttConfigBtn").addEventListener("click", async () => {
-    try {
-      const payload = parseJsonInput("mqttConfigInput");
-      const result = await requestJson("/api/config/mqtt", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify(payload),
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshConfig(), refreshNetwork(), refreshStatus()]);
     } catch (error) {
       setJson("actionResult", { error: error.message });
     }
@@ -349,51 +322,6 @@ function bindEvents() {
       });
       setJson("actionResult", result);
       await refreshNetwork();
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("mqttConnectBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/network/mqtt/connect", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshStatus(), refreshNetwork()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("mqttDisconnectBtn").addEventListener("click", async () => {
-    try {
-      const result = await requestJson("/api/network/mqtt/disconnect", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: "{}",
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshStatus(), refreshNetwork()]);
-    } catch (error) {
-      setJson("actionResult", { error: error.message });
-    }
-  });
-
-  document.getElementById("mqttPublishForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const topic = document.getElementById("mqttTopic").value.trim();
-    const payload = document.getElementById("mqttPayload").value;
-    try {
-      const result = await requestJson("/api/network/mqtt/publish", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ topic, payload }),
-      });
-      setJson("actionResult", result);
-      await Promise.all([refreshStatus(), refreshNetwork()]);
     } catch (error) {
       setJson("actionResult", { error: error.message });
     }

@@ -40,6 +40,48 @@ Le parseur accepte aussi:
 - `cmd`, `command`, `action` (root ou `payload`)
 - format texte "`CMD arg`"
 
+## Routing média (A252)
+
+- Legacy conservé: `LA_OK`, `LA_BUSY`, etc. avec map locale.
+- Contrat runtime tone: `kind=tone` (plus de route tone en WAV).
+- Format enrichi accepté:
+
+```json
+{
+  "type": "command",
+  "payload": {
+    "cmd": "LA_OK",
+    "args": {
+      "audio": {
+        "kind": "tone",
+        "profile": "FR_FR",
+        "event": "busy"
+      }
+    }
+  }
+}
+```
+
+- Format fichier non-tone toujours supporté:
+
+```json
+{
+  "audio": {
+    "kind": "file",
+    "path": "/media/welcome.wav",
+    "source": "auto"
+  }
+}
+```
+
+- `audio.source` supporté pour `kind=file`: `sd`, `littlefs`, `auto`.
+- Si `source` absent: politique A252 par défaut = `SD_THEN_LITTLEFS`.
+- Toute route tone legacy via `/assets/wav/<PROFILE>/<event>.wav` est rejetée au `ESPNOW_CALL_MAP_SET`.
+
+## Référence tonale
+
+Le plan tonal standard A252 est documenté dans [docs/audio_tone_plan.md](audio_tone_plan.md).
+
 ## Commandes supportées (ESP-NOW)
 
 - `STATUS`

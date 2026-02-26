@@ -173,19 +173,6 @@ void WebServerManager::registerRoutes() {
         handleDispatch(request, "AUDIO_CONFIG_SET " + payload);
     });
 
-    server_.on("/api/config/mqtt", HTTP_GET,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "MQTT_STATUS"); });
-    server_.on("/api/config/mqtt", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        if (!extractJsonBody(request, doc)) {
-            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
-            return;
-        }
-        String payload;
-        serializeJson(doc, payload);
-        handleDispatch(request, "MQTT_CONFIG_SET " + payload);
-    });
-
     // WiFi.
     server_.on("/api/network/wifi", HTTP_GET,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "WIFI_STATUS"); });
@@ -209,28 +196,6 @@ void WebServerManager::registerRoutes() {
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "WIFI_RECONNECT"); });
     server_.on("/api/network/wifi/scan", HTTP_POST,
                [this](AsyncWebServerRequest* request) { handleDispatch(request, "WIFI_SCAN"); });
-
-    // MQTT.
-    server_.on("/api/network/mqtt", HTTP_GET,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "MQTT_STATUS"); });
-    server_.on("/api/network/mqtt/connect", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "MQTT_CONNECT"); });
-    server_.on("/api/network/mqtt/disconnect", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "MQTT_DISCONNECT"); });
-    server_.on("/api/network/mqtt/publish", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        if (!extractJsonBody(request, doc)) {
-            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
-            return;
-        }
-        const String topic = doc["topic"] | "";
-        const String payload = doc["payload"] | "";
-        if (!isValidInput(topic, 128)) {
-            request->send(400, "application/json", "{\"error\":\"invalid topic\"}");
-            return;
-        }
-        handleDispatch(request, "MQTT_PUBLISH " + topic + " " + payload);
-    });
 
     // ESP-NOW.
     server_.on("/api/network/espnow", HTTP_GET,
@@ -304,66 +269,6 @@ void WebServerManager::registerRoutes() {
         handleDispatch(request, "ESPNOW_SEND " + mac + " " + payload);
     });
 
-    // Bluetooth.
-    server_.on("/api/bluetooth", HTTP_GET,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_STATUS"); });
-    server_.on("/api/bluetooth/hfp/connect", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        if (!extractJsonBody(request, doc)) {
-            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
-            return;
-        }
-        const String addr = doc["addr"] | "";
-        if (!isValidInput(addr, 32)) {
-            request->send(400, "application/json", "{\"error\":\"invalid addr\"}");
-            return;
-        }
-        handleDispatch(request, "BT_HFP_CONNECT " + addr);
-    });
-    server_.on("/api/bluetooth/hfp/disconnect", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_HFP_DISCONNECT"); });
-    server_.on("/api/bluetooth/hfp/auto", HTTP_GET,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_STATUS"); });
-    server_.on("/api/bluetooth/hfp/auto", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        if (!extractJsonBody(request, doc)) {
-            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
-            return;
-        }
-        const bool enabled = doc["enabled"] | true;
-        handleDispatch(request, enabled ? "BT_AUTO_RECONNECT_ON" : "BT_AUTO_RECONNECT_OFF");
-    });
-    server_.on("/api/bluetooth/discoverable/on", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_DISCOVERABLE_ON"); });
-    server_.on("/api/bluetooth/discoverable/off", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_DISCOVERABLE_OFF"); });
-    server_.on("/api/bluetooth/hfp/dial", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        if (!extractJsonBody(request, doc)) {
-            request->send(400, "application/json", "{\"error\":\"invalid json body\"}");
-            return;
-        }
-        const String number = doc["number"] | "";
-        if (!isValidInput(number, 32)) {
-            request->send(400, "application/json", "{\"error\":\"invalid number\"}");
-            return;
-        }
-        handleDispatch(request, "BT_DIAL " + number);
-    });
-    server_.on("/api/bluetooth/hfp/redial", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_REDIAL"); });
-    server_.on("/api/bluetooth/hfp/answer", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_ANSWER"); });
-    server_.on("/api/bluetooth/hfp/hangup", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_HANGUP"); });
-    server_.on("/api/bluetooth/hfp/calls", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_CALLS"); });
-    server_.on("/api/bluetooth/pbap/sync", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_PBAP_SYNC"); });
-    server_.on("/api/bluetooth/ble/start", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_BLE_START"); });
-    server_.on("/api/bluetooth/ble/stop", HTTP_POST,
-               [this](AsyncWebServerRequest* request) { handleDispatch(request, "BT_BLE_STOP"); });
 }
 
 bool WebServerManager::authenticateRequest(AsyncWebServerRequest* request) const {
@@ -413,9 +318,7 @@ bool WebServerManager::isEffectCommand(const String& command_line) {
     token.trim();
     token.toUpperCase();
 
-    return token == "CALL" || token == "PLAY" || token == "CAPTURE_START" || token == "CAPTURE_STOP" ||
-           token == "BT_DIAL" || token == "DIAL" || token == "BT_REDIAL" || token == "BT_ANSWER" ||
-           token == "BT_HANGUP";
+    return token == "CALL" || token == "PLAY" || token == "CAPTURE_START" || token == "CAPTURE_STOP";
 }
 
 bool WebServerManager::extractCommandId(const String& command_line, String& command_id) {

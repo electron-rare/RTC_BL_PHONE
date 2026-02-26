@@ -22,6 +22,15 @@ Le script `scripts/branch_gate.sh` exécute les contrôles suivants, dans l’or
 - **ESP-NOW obligatoire** : seule la pile de transport activée est prise en compte pour les scénarios de validation.
 - **Bluetooth retiré** : aucun endpoint/commande Bluetooth n’est attendu, ni traité.
 - **Auth web Wi-Fi désactivée** : la validation considère les endpoints web accessibles sans authentification basique.
+- **Routing média A252** : lecture audio supporte `SD`/`LITTLEFS` avec fallback `SD_THEN_LITTLEFS` et mapping numérotation/ESP-NOW persistant.
+- **Tone plan tonal** : runtime 100% code (`TONE_PLAY` / `TONE_STOP`, `kind=tone`), WAV conservés uniquement comme référence documentaire dans [docs/audio_tone_plan.md](audio_tone_plan.md) et [docs/specs/tone_plan_wav_assets](specs/tone_plan_wav_assets).
+- **Statut tonal/audio** : `STATUS.audio` doit exposer `tone_route_active`, `tone_rendering`, `tone_profile`, `tone_event`, `tone_engine`, et les champs playback complets:
+  - `playback_input_sample_rate/bits_per_sample/channels`
+  - `playback_output_sample_rate/bits_per_sample/channels`
+  - `playback_resampler_active`, `playback_channel_upmix_active`
+  - `playback_loudness_gain_db`, `playback_limiter_active`, `playback_rate_fallback`
+- **Fingerprint firmware** : `STATUS.firmware` doit exposer `build_id`, `git_sha`, `contract_version` (contrat attendu: `A252_AUDIO_CHAIN_V2`).
+- **Board contract A252** : référence matérielle canonique dans [docs/a252_board_spec.md](./a252_board_spec.md) et [docs/specs/ai_thinker_esp32_a1s_es8388_n4r8.agent.v2.yaml](./specs/ai_thinker_esp32_a1s_es8388_n4r8.agent.v2.yaml).
 
 ## Cible CI
 
@@ -50,6 +59,24 @@ bash scripts/branch_gate.sh --build-env esp32dev --build-env esp32-s3-devkitc-1
 - Le profil standard de cette branche est `a252` (A252 strict).
 - Le profil `full` reste disponible pour les campagnes de compatibilité multi-cartes.
 
+## Gate hardware A252 (local)
+
+Pour la validation hardware locale, utiliser `scripts/a252_strict_gate.sh`.
+
+- Mode unattended (défaut): `A252_IGNORE_ZEROCLAW=1` et `A252_REQUIRE_HOOK_TOGGLE=0`.
+- Mode strict opérateur: `A252_REQUIRE_HOOK_TOGGLE=1` pour exiger `ON_HOOK` + `OFF_HOOK`.
+- `hw_validation.py` exécute les scénarios bloquants `serial_firmware_contract` et `serial_audio_format_chain` pour éviter les diagnostics sur firmware périmé et valider la chaîne format/bitrate.
+
+Exemple:
+
+```bash
+A252_WIFI_SSID="Les cils" \
+A252_WIFI_PASSWORD="***" \
+A252_REQUIRE_HOOK_TOGGLE=1 \
+bash scripts/a252_strict_gate.sh
+```
+
 ## Redirection historique
 
 - `docs/pre_merge_checks.md` est conservé comme redirection vers ce document.
+- `docs/audio_tone_plan.md` centralise les spécifications tonales et les assets de tonalité.

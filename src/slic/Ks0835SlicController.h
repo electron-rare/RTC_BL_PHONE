@@ -11,12 +11,14 @@ public:
     void setLineEnabled(bool enabled) override;
     bool isHookOff() const override;
     void setPowerDown(bool enabled) override;
+    bool isPowerDownEnabled() const override;
     void tick() override;
 
 private:
     SlicPins pins_;
     bool initialized_;
     bool ring_enabled_;
+    bool power_down_enabled_;
     bool fr_state_;
     uint32_t last_fr_toggle_ms_;
 };

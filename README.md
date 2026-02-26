@@ -6,16 +6,16 @@ Projet ESP32 : téléphone RTC, SLIC, audio, Bluetooth, WiFi, agentic.
 Le pipeline CI/CD est géré par GitHub Actions + PlatformIO.
 
 - **Déclenchement** : à chaque push ou pull request sur `main` ou `release/stable`.
-- **Gate de validation** : exécution du script `scripts/pre_merge.sh` (ordre de checks unifié).
+- **Gate de validation** : exécution du script `scripts/branch_gate.sh` (ordre de checks unifié).
 - **Vérifications** : tests Python/unit, tests hôte DTMF, parity WebUI/commandes, puis builds des cibles actives.
 - **Artefact** : `artifacts/route_parity_report.json` généré par la gate.
 
 ### Gate de branche (qualité)
-Le script de référence est `scripts/pre_merge.sh` (définition dans [docs/branch_quality_gate.md](docs/branch_quality_gate.md)).  
+Le script de référence est `scripts/branch_gate.sh` (définition dans [docs/branch_quality_gate.md](docs/branch_quality_gate.md)).
 Commande locale recommandée :
 
 ```bash
-bash scripts/pre_merge.sh
+bash scripts/branch_gate.sh
 ```
 
 Exécuter uniquement les checks sans build (ex. pour un contrôle rapide local) :
@@ -23,6 +23,51 @@ Exécuter uniquement les checks sans build (ex. pour un contrôle rapide local) 
 ```bash
 bash scripts/test_terminal.sh
 ```
+
+## Intégration A252 (réintégration firmware)
+
+Repérage du port série (A252: USB-Serial prioritaire) :
+
+```bash
+python3 scripts/diagnostic_esp_ports.py
+```
+
+Commande recommandée de réintégration sur la carte A252 (USB-Serial) :
+
+Si le port USB‑Serial est bien branché, `hw_validation` le détecte automatiquement:
+
+```bash
+python3 scripts/hw_validation.py \
+  --flash \
+  --wifi-ssid "<SSID>" \
+  --wifi-password "<WIFIPASS>" \
+  --report-json artifacts/hw_validation_a252_report.json \
+  --report-md docs/hw_validation_a252_report.md
+```
+
+Ou en mode explicite:
+
+```bash
+python3 scripts/hw_validation.py \
+  --port-a252 /dev/cu.usbserial-0001 \
+  --flash \
+  --wifi-ssid "<SSID>" \
+  --wifi-password "<WIFIPASS>" \
+  --report-json artifacts/hw_validation_a252_report.json \
+  --report-md docs/hw_validation_a252_report.md
+```
+
+Version minimal sans essais Wi‑Fi (si pas de réseau test) :
+
+```bash
+python3 scripts/hw_validation.py \
+  --port-a252 /dev/cu.usbserial-0001 \
+  --flash \
+  --report-json artifacts/hw_validation_a252_report.json \
+  --report-md docs/hw_validation_a252_report.md
+```
+
+Si le firmware expose une IP après connexion Wi-Fi, les endpoints HTTP sont testés automatiquement. Sinon le scénario HTTP est marqué `MANUAL_SKIP`.
 
 ## Livraison
 Après chaque build, les binaires sont disponibles en téléchargement dans les artefacts du workflow.

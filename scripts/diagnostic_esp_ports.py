@@ -10,7 +10,8 @@ import time
 import sys
 
 PORT_PATTERNS = [
-    '/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbserial*', '/dev/cu.SLAB_USBtoUART*', '/dev/cu.wchusbserial*', '/dev/cu.usbmodem*'
+    '/dev/tty.usbserial*', '/dev/cu.usbserial*', '/dev/ttyUSB*', '/dev/ttyACM*',
+    '/dev/cu.wchusbserial*', '/dev/cu.SLAB_USBtoUART*', '/dev/cu.usbmodem*', '/dev/tty.usbmodem*',
 ]
 
 def detect_serial_ports():

@@ -2,4 +2,4 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${SCRIPT_DIR}/pre_merge.sh" --skip-builds "$@"
+exec "${SCRIPT_DIR}/branch_gate.sh" --skip-builds "$@"

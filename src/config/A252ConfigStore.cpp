@@ -11,6 +11,8 @@ constexpr const char* kPinsNs = "a252-pins";
 constexpr const char* kAudioNs = "a252-audio";
 constexpr const char* kEspNowNs = "espnow";
 constexpr const char* kEspNowCallMapNs = "espnow-call";
+constexpr const char* kDialMediaMapNs = "dial-media";
+constexpr uint16_t kMaxPlaybackPauseMs = 10000U;
 
 bool saveString(Preferences& prefs, const char* key, const String& value) {
     return prefs.putString(key, value) >= 0;
@@ -41,22 +43,160 @@ String normalizeEspNowCallKeyword(const String& keyword) {
     return normalized;
 }
 
-void mergeCallMapEntry(EspNowCallMap& map, const String& keyword, const String& path) {
+void mergeCallMapEntry(EspNowCallMap& map, const String& keyword, const MediaRouteEntry& route) {
     const String normalized_keyword = normalizeEspNowCallKeyword(keyword);
     if (normalized_keyword.isEmpty()) {
         return;
     }
-    if (path.isEmpty()) {
+    if (!mediaRouteHasPayload(route)) {
         return;
     }
 
     for (EspNowCallMapEntry& entry : map) {
         if (entry.keyword == normalized_keyword) {
-            entry.path = path;
+            entry.route = route;
             return;
         }
     }
-    map.push_back({normalized_keyword, path});
+    EspNowCallMapEntry created;
+    created.keyword = normalized_keyword;
+    created.route = route;
+    map.push_back(created);
+}
+
+void mergeDialMediaMapEntry(DialMediaMap& map, const String& number, const MediaRouteEntry& route) {
+    String normalized_number = number;
+    normalized_number.trim();
+    if (normalized_number.isEmpty()) {
+        return;
+    }
+    if (!mediaRouteHasPayload(route)) {
+        return;
+    }
+
+    for (DialMediaMapEntry& entry : map) {
+        if (entry.number == normalized_number) {
+            entry.route = route;
+            return;
+        }
+    }
+    DialMediaMapEntry created;
+    created.number = normalized_number;
+    created.route = route;
+    map.push_back(created);
+}
+
+bool parseMediaRouteEntry(JsonVariantConst value, MediaRouteEntry& out) {
+    out = MediaRouteEntry{};
+    if (value.is<const char*>()) {
+        out.kind = MediaRouteKind::FILE;
+        out.path = sanitizeMediaPath(value.as<const char*>());
+        out.source = MediaSource::AUTO;
+        return !out.path.isEmpty();
+    }
+    if (!value.is<JsonObjectConst>()) {
+        return false;
+    }
+    JsonObjectConst obj = value.as<JsonObjectConst>();
+
+    MediaRouteKind kind = MediaRouteKind::FILE;
+    if (obj["kind"].is<const char*>()) {
+        if (!parseMediaRouteKind(obj["kind"].as<const char*>(), kind)) {
+            return false;
+        }
+    }
+    out.kind = kind;
+
+    if (kind == MediaRouteKind::TONE) {
+        if (!obj["profile"].is<const char*>() || !obj["event"].is<const char*>()) {
+            return false;
+        }
+        if (!parseToneProfile(obj["profile"].as<const char*>(), out.tone.profile)) {
+            return false;
+        }
+        if (!parseToneEvent(obj["event"].as<const char*>(), out.tone.event)) {
+            return false;
+        }
+        if (out.tone.profile == ToneProfile::NONE || out.tone.event == ToneEvent::NONE) {
+            return false;
+        }
+        out.path = "";
+        out.source = MediaSource::AUTO;
+        return true;
+    }
+
+    if (!obj["path"].is<const char*>()) {
+        return false;
+    }
+
+    out.path = sanitizeMediaPath(obj["path"].as<const char*>());
+    if (out.path.isEmpty()) {
+        return false;
+    }
+
+    out.source = MediaSource::AUTO;
+    if (obj["source"].is<const char*>()) {
+        MediaSource parsed = MediaSource::AUTO;
+        if (!parseMediaSource(obj["source"].as<const char*>(), parsed)) {
+            return false;
+        }
+        out.source = parsed;
+    }
+
+    bool loop = false;
+    if (obj["playback"]["loop"].is<bool>()) {
+        loop = obj["playback"]["loop"].as<bool>();
+    } else if (obj["loop"].is<bool>()) {
+        loop = obj["loop"].as<bool>();
+    }
+
+    uint16_t pause_ms = 0U;
+    if (obj["playback"]["pause_ms"].is<int>()) {
+        const int raw = obj["playback"]["pause_ms"].as<int>();
+        if (raw < 0 || raw > static_cast<int>(kMaxPlaybackPauseMs)) {
+            return false;
+        }
+        pause_ms = static_cast<uint16_t>(raw);
+    } else if (obj["pause_ms"].is<int>()) {
+        const int raw = obj["pause_ms"].as<int>();
+        if (raw < 0 || raw > static_cast<int>(kMaxPlaybackPauseMs)) {
+            return false;
+        }
+        pause_ms = static_cast<uint16_t>(raw);
+    }
+
+    out.playback.loop = loop;
+    out.playback.pause_ms = pause_ms;
+    return true;
+}
+
+void writeMediaRouteToObject(JsonObject obj, const char* key, const MediaRouteEntry& route) {
+    if (key == nullptr || key[0] == '\0') {
+        return;
+    }
+    if (route.kind == MediaRouteKind::TONE) {
+        JsonObject tone_obj = obj[key].to<JsonObject>();
+        tone_obj["kind"] = "tone";
+        tone_obj["profile"] = toneProfileToString(route.tone.profile);
+        tone_obj["event"] = toneEventToString(route.tone.event);
+        return;
+    }
+    const bool has_playback_policy = route.playback.loop || route.playback.pause_ms > 0U;
+    if (route.source == MediaSource::AUTO && !has_playback_policy) {
+        obj[key] = route.path;
+        return;
+    }
+    JsonObject route_obj = obj[key].to<JsonObject>();
+    route_obj["kind"] = "file";
+    route_obj["path"] = route.path;
+    if (route.source != MediaSource::AUTO) {
+        route_obj["source"] = mediaSourceToString(route.source);
+    }
+    if (has_playback_policy) {
+        JsonObject playback = route_obj["playback"].to<JsonObject>();
+        playback["loop"] = route.playback.loop;
+        playback["pause_ms"] = route.playback.pause_ms;
+    }
 }
 
 }  // namespace
@@ -186,6 +326,17 @@ bool A252ConfigStore::loadAudio(A252AudioConfig& out) {
     if (prefs.isKey("route")) {
         out.route = prefs.getString("route", out.route);
     }
+    if (prefs.isKey("clock_policy")) {
+        out.clock_policy = prefs.getString("clock_policy", out.clock_policy);
+    }
+    if (prefs.isKey("wav_loudness_policy")) {
+        out.wav_loudness_policy = prefs.getString("wav_loudness_policy", out.wav_loudness_policy);
+    }
+    out.wav_target_rms_dbfs = static_cast<int16_t>(prefs.getInt("wav_rms_dbfs", out.wav_target_rms_dbfs));
+    out.wav_limiter_ceiling_dbfs =
+        static_cast<int16_t>(prefs.getInt("wav_ceiling_dbfs", out.wav_limiter_ceiling_dbfs));
+    out.wav_limiter_attack_ms = static_cast<uint16_t>(prefs.getUInt("wav_attack_ms", out.wav_limiter_attack_ms));
+    out.wav_limiter_release_ms = static_cast<uint16_t>(prefs.getUInt("wav_release_ms", out.wav_limiter_release_ms));
     prefs.end();
 
     String error;
@@ -224,6 +375,12 @@ bool A252ConfigStore::saveAudio(const A252AudioConfig& cfg, String* error) {
     prefs.putUChar("vol", cfg.volume);
     saveString(prefs, "route", cfg.route);
     prefs.putBool("mute", cfg.mute);
+    saveString(prefs, "clock_policy", cfg.clock_policy);
+    saveString(prefs, "wav_loudness_policy", cfg.wav_loudness_policy);
+    prefs.putInt("wav_rms_dbfs", cfg.wav_target_rms_dbfs);
+    prefs.putInt("wav_ceiling_dbfs", cfg.wav_limiter_ceiling_dbfs);
+    prefs.putUInt("wav_attack_ms", cfg.wav_limiter_attack_ms);
+    prefs.putUInt("wav_release_ms", cfg.wav_limiter_release_ms);
     prefs.end();
     return true;
 }
@@ -274,11 +431,12 @@ bool A252ConfigStore::loadEspNowCallMap(EspNowCallMap& out) {
 
     JsonObject obj = doc.as<JsonObject>();
     for (JsonPair item : obj) {
-        if (!item.value().is<const char*>()) {
+        MediaRouteEntry route;
+        if (!parseMediaRouteEntry(item.value(), route)) {
             continue;
         }
         const String key = item.key().c_str();
-        mergeCallMapEntry(out, key, item.value().as<const char*>());
+        mergeCallMapEntry(out, key, route);
     }
     return true;
 }
@@ -287,10 +445,10 @@ bool A252ConfigStore::saveEspNowCallMap(const EspNowCallMap& map, String* error)
     JsonDocument doc;
     JsonObject obj = doc.to<JsonObject>();
     for (const EspNowCallMapEntry& entry : map) {
-        if (entry.keyword.isEmpty() || entry.path.isEmpty()) {
+        if (entry.keyword.isEmpty() || !mediaRouteHasPayload(entry.route)) {
             continue;
         }
-        obj[entry.keyword] = entry.path;
+        writeMediaRouteToObject(obj, entry.keyword.c_str(), entry.route);
     }
 
     String raw;
@@ -308,12 +466,71 @@ bool A252ConfigStore::saveEspNowCallMap(const EspNowCallMap& map, String* error)
     return ok;
 }
 
-void A252ConfigStore::espNowCallMapToJson(const EspNowCallMap& map, JsonObject obj) {
-    for (const EspNowCallMapEntry& entry : map) {
-        if (entry.keyword.isEmpty() || entry.path.isEmpty()) {
+bool A252ConfigStore::loadDialMediaMap(DialMediaMap& out) {
+    out.clear();
+    Preferences prefs;
+    if (!prefs.begin(kDialMediaMapNs, false)) {
+        return false;
+    }
+    const String raw = prefs.isKey("mappings") ? prefs.getString("mappings", "{}") : String("{}");
+    prefs.end();
+
+    JsonDocument doc;
+    if (!loadJsonObject(raw, doc)) {
+        return false;
+    }
+
+    JsonObject obj = doc.as<JsonObject>();
+    for (JsonPair item : obj) {
+        MediaRouteEntry route;
+        if (!parseMediaRouteEntry(item.value(), route)) {
             continue;
         }
-        obj[entry.keyword] = entry.path;
+        mergeDialMediaMapEntry(out, item.key().c_str(), route);
+    }
+    return true;
+}
+
+bool A252ConfigStore::saveDialMediaMap(const DialMediaMap& map, String* error) {
+    JsonDocument doc;
+    JsonObject obj = doc.to<JsonObject>();
+    for (const DialMediaMapEntry& entry : map) {
+        if (entry.number.isEmpty() || !mediaRouteHasPayload(entry.route)) {
+            continue;
+        }
+        writeMediaRouteToObject(obj, entry.number.c_str(), entry.route);
+    }
+
+    String raw;
+    serializeJson(obj, raw);
+
+    Preferences prefs;
+    if (!prefs.begin(kDialMediaMapNs, false)) {
+        if (error) {
+            *error = "nvs_open_failed";
+        }
+        return false;
+    }
+    const bool ok = prefs.putString("mappings", raw) >= 0;
+    prefs.end();
+    return ok;
+}
+
+void A252ConfigStore::espNowCallMapToJson(const EspNowCallMap& map, JsonObject obj) {
+    for (const EspNowCallMapEntry& entry : map) {
+        if (entry.keyword.isEmpty() || !mediaRouteHasPayload(entry.route)) {
+            continue;
+        }
+        writeMediaRouteToObject(obj, entry.keyword.c_str(), entry.route);
+    }
+}
+
+void A252ConfigStore::dialMediaMapToJson(const DialMediaMap& map, JsonObject obj) {
+    for (const DialMediaMapEntry& entry : map) {
+        if (entry.number.isEmpty() || !mediaRouteHasPayload(entry.route)) {
+            continue;
+        }
+        writeMediaRouteToObject(obj, entry.number.c_str(), entry.route);
     }
 }
 
@@ -471,9 +688,43 @@ bool A252ConfigStore::validateAudio(const A252AudioConfig& cfg, String& error) {
         return false;
     }
 
-    const String route = cfg.route;
+    String route = cfg.route;
+    route.trim();
+    route.toLowerCase();
     if (!(route == "rtc" || route == "none")) {
         error = "invalid_route";
+        return false;
+    }
+
+    String clock_policy = cfg.clock_policy;
+    clock_policy.trim();
+    clock_policy.toUpperCase();
+    if (!(clock_policy == "HYBRID_TELCO")) {
+        error = "invalid_clock_policy";
+        return false;
+    }
+
+    String wav_policy = cfg.wav_loudness_policy;
+    wav_policy.trim();
+    wav_policy.toUpperCase();
+    if (!(wav_policy == "AUTO_NORMALIZE_LIMITER" || wav_policy == "FIXED_GAIN_ONLY")) {
+        error = "invalid_wav_loudness_policy";
+        return false;
+    }
+    if (cfg.wav_target_rms_dbfs < -36 || cfg.wav_target_rms_dbfs > -6) {
+        error = "invalid_wav_target_rms_dbfs";
+        return false;
+    }
+    if (cfg.wav_limiter_ceiling_dbfs < -12 || cfg.wav_limiter_ceiling_dbfs > 0) {
+        error = "invalid_wav_limiter_ceiling_dbfs";
+        return false;
+    }
+    if (cfg.wav_limiter_attack_ms < 1 || cfg.wav_limiter_attack_ms > 1000) {
+        error = "invalid_wav_limiter_attack_ms";
+        return false;
+    }
+    if (cfg.wav_limiter_release_ms < 1 || cfg.wav_limiter_release_ms > 5000) {
+        error = "invalid_wav_limiter_release_ms";
         return false;
     }
 
@@ -520,6 +771,12 @@ void A252ConfigStore::audioToJson(const A252AudioConfig& cfg, JsonObject obj) {
     obj["volume"] = cfg.volume;
     obj["mute"] = cfg.mute;
     obj["route"] = cfg.route;
+    obj["clock_policy"] = cfg.clock_policy;
+    obj["wav_loudness_policy"] = cfg.wav_loudness_policy;
+    obj["wav_target_rms_dbfs"] = cfg.wav_target_rms_dbfs;
+    obj["wav_limiter_ceiling_dbfs"] = cfg.wav_limiter_ceiling_dbfs;
+    obj["wav_limiter_attack_ms"] = cfg.wav_limiter_attack_ms;
+    obj["wav_limiter_release_ms"] = cfg.wav_limiter_release_ms;
 }
 
 void A252ConfigStore::peersToJson(const EspNowPeerStore& store, JsonArray arr) {

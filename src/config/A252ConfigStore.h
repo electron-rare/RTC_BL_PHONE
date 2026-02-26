@@ -6,21 +6,24 @@
 
 #include <vector>
 
-struct A252PinsConfig {
-    int i2s_bck = 27;
-    int i2s_ws = 25;
-    int i2s_dout = 26;
-    int i2s_din = 35;
+#include "config/a1s_board_pins.h"
+#include "media/MediaRouting.h"
 
-    int es8388_sda = 33;
-    int es8388_scl = 32;
+struct A252PinsConfig {
+    int i2s_bck = A1S_I2S_BCLK;
+    int i2s_ws = A1S_I2S_LRCK;
+    int i2s_dout = A1S_I2S_DOUT;
+    int i2s_din = A1S_I2S_DIN;
+
+    int es8388_sda = A1S_I2C_SDA;
+    int es8388_scl = A1S_I2C_SCL;
 
     // A252 bench defaults.
-    int slic_rm = 18;
-    int slic_fr = 5;
-    int slic_shk = 23;
+    int slic_rm = A1S_SLIC_RM;
+    int slic_fr = A1S_SLIC_FR;
+    int slic_shk = A1S_SLIC_SHK;
     int slic_line = -1;
-    int slic_pd = 19;
+    int slic_pd = A1S_SLIC_PD;
     int slic_adc_in = -1;
     bool hook_active_high = true;
 
@@ -31,7 +34,7 @@ struct A252PinsConfig {
 };
 
 struct A252AudioConfig {
-    uint32_t sample_rate = 16000;
+    uint32_t sample_rate = 8000;
     uint8_t bits_per_sample = 16;
     bool enable_capture = true;
     bool adc_dsp_enabled = true;
@@ -39,26 +42,30 @@ struct A252AudioConfig {
     uint8_t adc_dsp_fft_downsample = 2U;
     uint16_t adc_fft_ignore_low_bin = 1U;
     uint16_t adc_fft_ignore_high_bin = 1U;
-    uint8_t volume = 90;
+    uint8_t volume = 100;
     bool mute = false;
     String route = "rtc";
+    String clock_policy = "HYBRID_TELCO";
+    String wav_loudness_policy = "AUTO_NORMALIZE_LIMITER";
+    int16_t wav_target_rms_dbfs = -18;
+    int16_t wav_limiter_ceiling_dbfs = -2;
+    uint16_t wav_limiter_attack_ms = 8;
+    uint16_t wav_limiter_release_ms = 120;
 };
 
 struct EspNowCallMapEntry {
     String keyword;
-    String path;
+    MediaRouteEntry route;
 };
 
 using EspNowCallMap = std::vector<EspNowCallMapEntry>;
 
-struct MqttConfig {
-    bool enabled = false;
-    String host;
-    uint16_t port = 1883;
-    String user;
-    String pass;
-    String base_topic = "rtc_bl_phone/a252";
+struct DialMediaMapEntry {
+    String number;
+    MediaRouteEntry route;
 };
+
+using DialMediaMap = std::vector<DialMediaMapEntry>;
 
 struct EspNowPeerStore {
     std::vector<String> peers;
@@ -68,7 +75,6 @@ class A252ConfigStore {
 public:
     static A252PinsConfig defaultPins();
     static A252AudioConfig defaultAudio();
-    static MqttConfig defaultMqtt();
 
     static bool loadPins(A252PinsConfig& out);
     static bool savePins(const A252PinsConfig& cfg, String* error = nullptr);
@@ -76,23 +82,21 @@ public:
     static bool loadAudio(A252AudioConfig& out);
     static bool saveAudio(const A252AudioConfig& cfg, String* error = nullptr);
 
-    static bool loadMqtt(MqttConfig& out);
-    static bool saveMqtt(const MqttConfig& cfg, String* error = nullptr);
-
     static bool loadEspNowPeers(EspNowPeerStore& out);
     static bool saveEspNowPeers(const EspNowPeerStore& store, String* error = nullptr);
     static bool loadEspNowCallMap(EspNowCallMap& out);
     static bool saveEspNowCallMap(const EspNowCallMap& map, String* error = nullptr);
+    static bool loadDialMediaMap(DialMediaMap& out);
+    static bool saveDialMediaMap(const DialMediaMap& map, String* error = nullptr);
 
     static bool validatePins(const A252PinsConfig& cfg, String& error);
     static bool validateAudio(const A252AudioConfig& cfg, String& error);
-    static bool validateMqtt(const MqttConfig& cfg, String& error);
 
     static void pinsToJson(const A252PinsConfig& cfg, JsonObject obj);
     static void audioToJson(const A252AudioConfig& cfg, JsonObject obj);
-    static void mqttToJson(const MqttConfig& cfg, JsonObject obj, bool include_secret = false);
     static void peersToJson(const EspNowPeerStore& store, JsonArray arr);
     static void espNowCallMapToJson(const EspNowCallMap& map, JsonObject obj);
+    static void dialMediaMapToJson(const DialMediaMap& map, JsonObject obj);
 
     static String normalizeMac(const String& value);
     static bool parseMac(const String& value, uint8_t out[6]);

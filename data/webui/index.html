@@ -32,26 +32,19 @@
         <button id="refreshConfigBtn">Rafraîchir configuration</button>
       </div>
       <pre id="configJson"></pre>
-      <div class="grid2">
-        <div>
-          <h3>Audio config (JSON)</h3>
-          <textarea id="audioConfigInput" rows="8" placeholder='{"volume":80}'></textarea>
-          <div class="inline-actions">
-            <button id="applyAudioConfigBtn">Appliquer audio</button>
+        <div class="grid2">
+          <div>
+            <h3>Audio config (JSON)</h3>
+            <textarea id="audioConfigInput" rows="8" placeholder='{"volume":80}'></textarea>
+            <div class="inline-actions">
+              <button id="applyAudioConfigBtn">Appliquer audio</button>
+            </div>
           </div>
-        </div>
-        <div>
-          <h3>MQTT config (JSON)</h3>
-          <textarea id="mqttConfigInput" rows="8" placeholder='{"enabled":false}'></textarea>
-          <div class="inline-actions">
-            <button id="applyMqttConfigBtn">Appliquer MQTT</button>
-          </div>
-        </div>
-        <div>
-          <h3>Pins config (JSON)</h3>
-          <textarea id="pinsConfigInput" rows="8" placeholder='{"slic":{"line":23}}'></textarea>
-          <div class="inline-actions">
-            <button id="applyPinsConfigBtn">Appliquer pins</button>
+          <div>
+            <h3>Pins config (JSON)</h3>
+            <textarea id="pinsConfigInput" rows="8" placeholder='{"slic":{"line":23}}'></textarea>
+            <div class="inline-actions">
+              <button id="applyPinsConfigBtn">Appliquer pins</button>
           </div>
         </div>
       </div>
@@ -73,20 +66,6 @@
             <button id="wifiScanBtn">Scanner WiFi</button>
           </div>
           <pre id="wifiJson"></pre>
-        </div>
-
-        <div>
-          <h3>MQTT</h3>
-          <div class="inline-actions">
-            <button id="mqttConnectBtn">Connecter MQTT</button>
-            <button id="mqttDisconnectBtn">Déconnecter MQTT</button>
-          </div>
-          <form id="mqttPublishForm">
-            <input type="text" id="mqttTopic" placeholder="Topic (ex: rtc_bl_phone/a252/test)" required>
-            <textarea id="mqttPayload" rows="3" placeholder='Payload JSON ou texte'>{"ping":true}</textarea>
-            <button type="submit">Publier MQTT</button>
-          </form>
-          <pre id="mqttJson"></pre>
         </div>
 
         <div>

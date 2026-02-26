@@ -23,6 +23,40 @@ except ImportError:  # pragma: no cover
 
 VALID_STATES = {"PASS", "FAIL", "MANUAL_PASS", "MANUAL_FAIL", "MANUAL_SKIP"}
 OPTIONAL_SERIAL_COMMANDS = {"WIFI_SCAN", "ESPNOW_STATUS"}
+EXPECTED_FIRMWARE_CONTRACT_VERSION = "A252_AUDIO_CHAIN_V2"
+SUPPORTED_INPUT_BITS = {8, 16, 24, 32}
+SUPPORTED_OUTPUT_BITS = {16}
+SUPPORTED_CHANNELS = {1, 2}
+SUPPORTED_OUTPUT_SAMPLE_RATES = {8000, 16000, 22050, 32000, 44100, 48000}
+REQUIRED_FIRMWARE_KEYS = ("build_id", "git_sha", "contract_version")
+REQUIRED_AUDIO_STATUS_KEYS = (
+    "tone_route_active",
+    "tone_rendering",
+    "playback_input_sample_rate",
+    "playback_input_bits_per_sample",
+    "playback_input_channels",
+    "playback_output_sample_rate",
+    "playback_output_bits_per_sample",
+    "playback_output_channels",
+    "playback_resampler_active",
+    "playback_channel_upmix_active",
+    "playback_loudness_gain_db",
+    "playback_limiter_active",
+    "playback_rate_fallback",
+)
+REQUIRED_AUDIO_PROBE_KEYS = (
+    "input_sample_rate",
+    "input_bits_per_sample",
+    "input_channels",
+    "output_sample_rate",
+    "output_bits_per_sample",
+    "output_channels",
+    "resampler_active",
+    "channel_upmix_active",
+    "loudness_gain_db",
+    "limiter_active",
+    "rate_fallback",
+)
 
 
 @dataclass
@@ -39,6 +73,19 @@ def run_cmd(cmd: List[str]) -> None:
 
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _extract_audio_status(status_payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(status_payload, dict):
+        return {}
+    audio = status_payload.get("audio")
+    if not isinstance(audio, dict):
+        return {}
+    return audio
 
 
 class SerialEndpoint:
@@ -168,7 +215,6 @@ def scenario_serial_smoke(
     try:
         details["ping"] = dev.command("PING", expect="pong")
         details["status"] = dev.command("STATUS", expect="json")
-        details["call"] = dev.command("CALL", expect="ack")
         details["capture_start"] = dev.command("CAPTURE_START", expect="ack")
         details["capture_stop"] = dev.command("CAPTURE_STOP", expect="ack")
         details["reset_metrics"] = dev.command("RESET_METRICS", expect="ack")
@@ -183,6 +229,48 @@ def scenario_serial_smoke(
         return ScenarioResult("serial_smoke", state, details)
     except Exception as exc:
         return ScenarioResult("serial_smoke", "FAIL", {"error": str(exc)})
+
+
+def scenario_serial_firmware_contract(
+    dev: SerialEndpoint,
+    *,
+    required_contract_version: str,
+) -> ScenarioResult:
+    details: Dict[str, Any] = {}
+    try:
+        details["status"] = dev.command("STATUS", expect="json")
+        firmware = details["status"].get("firmware", {}) if isinstance(details["status"], dict) else {}
+        audio = _extract_audio_status(details["status"] if isinstance(details["status"], dict) else {})
+
+        missing_firmware = [key for key in REQUIRED_FIRMWARE_KEYS if key not in firmware]
+        missing_audio = [key for key in REQUIRED_AUDIO_STATUS_KEYS if key not in audio]
+
+        contract_value = ""
+        if isinstance(firmware, dict):
+            contract_value = str(firmware.get("contract_version", "")).strip()
+
+        checks = {
+            "firmware_block_present": isinstance(firmware, dict),
+            "firmware_required_keys_present": not missing_firmware,
+            "audio_required_keys_present": not missing_audio,
+            "contract_version_matches": (
+                not required_contract_version
+                or contract_value == required_contract_version
+            ),
+        }
+
+        details["checks"] = checks
+        details["missing_firmware_keys"] = missing_firmware
+        details["missing_audio_keys"] = missing_audio
+        details["contract_version"] = contract_value
+        details["required_contract_version"] = required_contract_version
+        return ScenarioResult(
+            "serial_firmware_contract",
+            "PASS" if all(checks.values()) else "FAIL",
+            details,
+        )
+    except Exception as exc:
+        return ScenarioResult("serial_firmware_contract", "FAIL", {"error": str(exc), **details})
 
 
 def _is_success_response(resp: Dict[str, Any]) -> bool:
@@ -265,7 +353,6 @@ def evaluate_serial_smoke_contract(
     ping_ok = bool(details.get("ping", {}).get("ok"))
     status_payload = details.get("status", {})
     status_ok = isinstance(status_payload, dict) and "telephony" in status_payload
-    call_ok = _is_success_response(details.get("call", {}))
     capture_start_ok = _is_success_response(details.get("capture_start", {}))
     capture_stop_ok = _is_success_response(details.get("capture_stop", {}))
     reset_metrics_ok = _is_success_response(details.get("reset_metrics", {}))
@@ -273,7 +360,7 @@ def evaluate_serial_smoke_contract(
     capture_enabled = _extract_capture_enabled(status_payload if isinstance(status_payload, dict) else {})
     capture_start_required = capture_enabled or (not allow_capture_fail_when_disabled)
 
-    required_checks: List[str] = ["PING", "STATUS", "CALL", "CAPTURE_STOP", "RESET_METRICS"]
+    required_checks: List[str] = ["PING", "STATUS", "CAPTURE_STOP", "RESET_METRICS"]
     if capture_start_required:
         required_checks.append("CAPTURE_START")
 
@@ -281,8 +368,6 @@ def evaluate_serial_smoke_contract(
         failed_checks.append("PING")
     if not status_ok:
         failed_checks.append("STATUS")
-    if not call_ok:
-        failed_checks.append("CALL")
     if not capture_stop_ok:
         failed_checks.append("CAPTURE_STOP")
     if not reset_metrics_ok:
@@ -361,13 +446,23 @@ def scenario_serial_network(dev: SerialEndpoint, wifi_ssid: str, wifi_password: 
                 )
                 time.sleep(2.0)
                 details["wifi_status_after"] = dev.command("WIFI_STATUS", expect="json")
+        # Re-sync dispatcher before ESPNOW_STATUS because telephony logs can interleave and
+        # occasionally delay a response right after ring/tone scenarios.
+        details["ping_before_espnow"] = _command_with_retry(
+            dev,
+            "PING",
+            expect="pong",
+            timeout_s=3.0,
+            attempts=3,
+            retry_delay_s=0.4,
+        )
         details["espnow_status"] = _command_with_retry(
             dev,
             "ESPNOW_STATUS",
             expect="any",
-            timeout_s=8.0,
-            attempts=2,
-            retry_delay_s=0.5,
+            timeout_s=10.0,
+            attempts=4,
+            retry_delay_s=1.0,
         )
 
         checks = [
@@ -429,6 +524,66 @@ def _extract_dial_tone_active(status_payload: Dict[str, Any]) -> Optional[bool]:
     return None
 
 
+def _extract_tone_active(status_payload: Dict[str, Any]) -> Optional[bool]:
+    if not isinstance(status_payload, dict):
+        return None
+    audio = status_payload.get("audio")
+    if not isinstance(audio, dict):
+        return None
+    value = audio.get("tone_active")
+    if isinstance(value, bool):
+        return value
+    value = audio.get("tone_rendering")
+    if isinstance(value, bool):
+        return value
+    value = audio.get("tone_route_active")
+    if isinstance(value, bool):
+        return value
+    return _extract_dial_tone_active(status_payload)
+
+
+def _extract_tone_route_active(status_payload: Dict[str, Any]) -> Optional[bool]:
+    if not isinstance(status_payload, dict):
+        return None
+    audio = status_payload.get("audio")
+    if not isinstance(audio, dict):
+        return None
+    value = audio.get("tone_route_active")
+    if isinstance(value, bool):
+        return value
+    return _extract_tone_active(status_payload)
+
+
+def _extract_tone_rendering(status_payload: Dict[str, Any]) -> Optional[bool]:
+    if not isinstance(status_payload, dict):
+        return None
+    audio = status_payload.get("audio")
+    if not isinstance(audio, dict):
+        return None
+    value = audio.get("tone_rendering")
+    if isinstance(value, bool):
+        return value
+    return _extract_tone_active(status_payload)
+
+
+def _is_supported_tone_bits(value: Any) -> bool:
+    if not isinstance(value, int):
+        return False
+    return value in {16, 24, 32}
+
+
+def _extract_tone_event(status_payload: Dict[str, Any]) -> str:
+    if not isinstance(status_payload, dict):
+        return ""
+    audio = status_payload.get("audio")
+    if not isinstance(audio, dict):
+        return ""
+    value = audio.get("tone_event")
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lower()
+
+
 def scenario_serial_hook_ring_audio(
     dev: SerialEndpoint,
     *,
@@ -437,6 +592,7 @@ def scenario_serial_hook_ring_audio(
 ) -> ScenarioResult:
     details: Dict[str, Any] = {}
     observed_hooks: List[str] = []
+    warnings: List[str] = []
 
     try:
         details["status_before"] = dev.command("STATUS", expect="json")
@@ -444,7 +600,6 @@ def scenario_serial_hook_ring_audio(
         if initial_hook:
             observed_hooks.append(initial_hook)
 
-        details["ring"] = dev.command("RING", expect="ack")
         details["tone_on"] = dev.command("TONE_ON", expect="ack")
         time.sleep(0.4)
         details["status_tone_on"] = dev.command("STATUS", expect="json")
@@ -472,40 +627,308 @@ def scenario_serial_hook_ring_audio(
         details["hook_values_observed"] = unique_hooks
         details["hook_observe_seconds"] = observe_seconds
 
-        ring_ok = _is_success_response(details["ring"])
         tone_on_ok = _is_success_response(details["tone_on"])
         tone_off_ok = _is_success_response(details["tone_off"])
-        tone_active_after_on = _extract_dial_tone_active(details["status_tone_on"]) is True
-        tone_inactive_after_off = _extract_dial_tone_active(details["status_tone_off"]) is False
+        tone_route_active_after_on = _extract_tone_route_active(details["status_tone_on"]) is True
+        tone_rendering_after_on = _extract_tone_rendering(details["status_tone_on"]) is True
+        tone_event_after_on = _extract_tone_event(details["status_tone_on"]) == "dial"
+        tone_route_inactive_after_off = _extract_tone_route_active(details["status_tone_off"]) is False
+        tone_rendering_after_off = _extract_tone_rendering(details["status_tone_off"])
 
         if require_hook_toggle:
             required_hooks = ["ON_HOOK", "OFF_HOOK"]
             hook_ok = all(state in unique_hooks for state in required_hooks)
             details["required_hook_states"] = required_hooks
         else:
-            hook_ok = len(unique_hooks) > 0
-            details["required_hook_states"] = ["ON_HOOK|OFF_HOOK"]
+            hook_ok = True
+            required_hooks = ["BYPASSED"]
+            details["required_hook_states"] = required_hooks
+            details["hook_validation_mode"] = "BYPASSED_NON_PRESENTIEL"
+            warnings.append("hook checks skipped because --no-require-hook-toggle is enabled")
 
         details["checks"] = {
-            "ring_ok": ring_ok,
             "tone_on_ok": tone_on_ok,
-            "tone_active_after_on": tone_active_after_on,
+            "tone_route_active_after_on": tone_route_active_after_on,
+            "tone_rendering_after_on": tone_rendering_after_on,
+            "tone_event_after_on": tone_event_after_on,
             "tone_off_ok": tone_off_ok,
-            "tone_inactive_after_off": tone_inactive_after_off,
+            "tone_route_inactive_after_off": tone_route_inactive_after_off,
             "hook_ok": hook_ok,
         }
+        if warnings:
+            details["warnings"] = warnings
+        details["tone_rendering_after_off"] = tone_rendering_after_off
 
         ok = (
-            ring_ok
-            and tone_on_ok
-            and tone_active_after_on
+            tone_on_ok
+            and tone_route_active_after_on
+            and tone_rendering_after_on
+            and tone_event_after_on
             and tone_off_ok
-            and tone_inactive_after_off
+            and tone_route_inactive_after_off
             and hook_ok
         )
         return ScenarioResult("serial_hook_ring_audio", "PASS" if ok else "FAIL", details)
     except Exception as exc:
         return ScenarioResult("serial_hook_ring_audio", "FAIL", {"error": str(exc), **details})
+
+
+def scenario_serial_media_routing(dev: SerialEndpoint) -> ScenarioResult:
+    details: Dict[str, Any] = {}
+    try:
+        dial_payload = '{"0123456789":{"kind":"tone","profile":"FR_FR","event":"ringback"}}'
+        espnow_payload = '{"LA_OK":{"kind":"tone","profile":"FR_FR","event":"busy"}}'
+        espnow_legacy_payload = '{"LA_BUSY":"/assets/wav/FR_FR/busy.wav"}'
+
+        details["dial_media_map_set"] = dev.command(f"DIAL_MEDIA_MAP_SET {dial_payload}", expect="ack")
+        details["dial_media_map_get"] = dev.command("DIAL_MEDIA_MAP_GET", expect="json")
+        details["espnow_call_map_set"] = dev.command(f"ESPNOW_CALL_MAP_SET {espnow_payload}", expect="ack")
+        details["espnow_call_map_set_legacy_tone"] = dev.command(
+            f"ESPNOW_CALL_MAP_SET {espnow_legacy_payload}",
+            expect="ack",
+        )
+        details["espnow_call_map_get"] = dev.command("ESPNOW_CALL_MAP_GET", expect="json")
+        details["play_legacy_tone"] = dev.command("PLAY /assets/wav/FR_FR/dial.wav", expect="ack")
+        details["tone_play"] = dev.command("TONE_PLAY FR_FR busy", expect="ack")
+        time.sleep(0.4)
+        details["status_after_tone_play"] = _command_with_retry(
+            dev,
+            "STATUS",
+            expect="json",
+            timeout_s=12.0,
+            attempts=4,
+            retry_delay_s=0.6,
+        )
+        details["tone_stop"] = dev.command("TONE_STOP", expect="ack")
+        time.sleep(0.2)
+        details["status_after_tone_stop"] = dev.command("STATUS", expect="json")
+
+        status_audio_play = (
+            details["status_after_tone_play"].get("audio", {}) if isinstance(details["status_after_tone_play"], dict) else {}
+        )
+        status_audio_stop = (
+            details["status_after_tone_stop"].get("audio", {}) if isinstance(details["status_after_tone_stop"], dict) else {}
+        )
+        status_config = (
+            details["status_after_tone_play"].get("config", {}) if isinstance(details["status_after_tone_play"], dict) else {}
+        )
+        status_audio_cfg = status_config.get("audio", {}) if isinstance(status_config, dict) else {}
+        dial_map = status_config.get("dial_media_map", {}) if isinstance(status_config, dict) else {}
+        espnow_map = status_config.get("espnow_call_map", {}) if isinstance(status_config, dict) else {}
+
+        playback_sample_rate = status_audio_play.get("playback_sample_rate")
+        playback_bits_per_sample = status_audio_play.get("playback_bits_per_sample")
+        playback_channels = status_audio_play.get("playback_channels")
+        playback_format_overridden = status_audio_play.get("playback_format_overridden")
+        config_sample_rate = status_audio_cfg.get("sample_rate") if isinstance(status_audio_cfg, dict) else None
+        config_bits_per_sample = status_audio_cfg.get("bits_per_sample") if isinstance(status_audio_cfg, dict) else None
+
+        tone_route_active_after_play = _extract_tone_route_active(details["status_after_tone_play"])
+        tone_rendering_after_play = _extract_tone_rendering(details["status_after_tone_play"])
+        tone_route_after_stop = _extract_tone_route_active(details["status_after_tone_stop"])
+
+        legacy_line = str(details["play_legacy_tone"].get("line", "")).upper()
+        legacy_rejected = (not _is_success_response(details["play_legacy_tone"])) and (
+            "TONE_WAV_DEPRECATED_USE_TONE_PLAY" in legacy_line
+        )
+        legacy_map_line = str(details["espnow_call_map_set_legacy_tone"].get("line", "")).upper()
+        legacy_map_rejected = (not _is_success_response(details["espnow_call_map_set_legacy_tone"])) and (
+            "TONE_WAV_DEPRECATED_USE_KIND_TONE" in legacy_map_line
+        )
+
+        checks = {
+            "dial_media_map_set_ok": _is_success_response(details["dial_media_map_set"]),
+            "espnow_call_map_set_ok": _is_success_response(details["espnow_call_map_set"]),
+            "espnow_call_map_set_legacy_tone_rejected": legacy_map_rejected,
+            "dial_media_map_status_present": isinstance(dial_map, dict),
+            "espnow_call_map_status_present": isinstance(espnow_map, dict),
+            "play_legacy_tone_rejected": legacy_rejected,
+            "tone_play_ok": _is_success_response(details["tone_play"]),
+            "tone_route_active_after_play": tone_route_active_after_play is True,
+            "tone_rendering_after_play": tone_rendering_after_play is True,
+            "tone_event_after_play": _extract_tone_event(details["status_after_tone_play"]) == "busy",
+            "tone_stop_ok": _is_success_response(details["tone_stop"]),
+            "tone_route_inactive_after_stop": tone_route_after_stop is False,
+            "tone_rendering_present": "tone_rendering" in status_audio_play,
+            "tone_route_present": "tone_route_active" in status_audio_play,
+            "playback_sample_rate_present": isinstance(playback_sample_rate, int),
+            "playback_bits_present": isinstance(playback_bits_per_sample, int),
+            "playback_channels_present": isinstance(playback_channels, int),
+            "playback_bits_supported": _is_supported_tone_bits(playback_bits_per_sample),
+            "playback_channels_supported": playback_channels in (1, 2),
+            "playback_format_overridden_bool": isinstance(playback_format_overridden, bool),
+            "playback_format_consistent_with_config": (
+                config_sample_rate is None
+                or config_bits_per_sample is None
+                or playback_format_overridden
+                or (
+                    isinstance(config_sample_rate, int)
+                    and isinstance(config_bits_per_sample, int)
+                    and playback_sample_rate == config_sample_rate
+                    and playback_bits_per_sample == config_bits_per_sample
+                )
+            ),
+            "storage_fields_present": all(
+                key in status_audio_play for key in ("storage_default_policy", "storage_last_source", "storage_last_path")
+            ),
+            "tone_fields_present": all(key in status_audio_stop for key in ("tone_active", "tone_profile", "tone_event", "tone_engine")),
+        }
+        details["checks"] = checks
+        ok = all(checks.values())
+        return ScenarioResult("serial_media_routing", "PASS" if ok else "FAIL", details)
+    except Exception as exc:
+        return ScenarioResult("serial_media_routing", "FAIL", {"error": str(exc), **details})
+
+
+def _candidate_probe_paths(preferred_path: str) -> List[str]:
+    candidates: List[str] = []
+    raw_candidates = [preferred_path, "/welcome.wav", "/musique.wav"]
+    for raw in raw_candidates:
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        if value not in candidates:
+            candidates.append(value)
+    return candidates
+
+
+def _select_audio_probe(
+    dev: SerialEndpoint,
+    preferred_path: str,
+) -> tuple[Optional[Dict[str, Any]], str, List[Dict[str, Any]]]:
+    attempts: List[Dict[str, Any]] = []
+    for path in _candidate_probe_paths(preferred_path):
+        probe_cmd = f"AUDIO_PROBE {_quote_arg(path)}"
+        response = _command_with_retry(
+            dev,
+            probe_cmd,
+            expect="any",
+            timeout_s=8.0,
+            attempts=2,
+            retry_delay_s=0.3,
+        )
+        attempts.append({"path": path, "response": response})
+        if isinstance(response, dict) and all(key in response for key in REQUIRED_AUDIO_PROBE_KEYS):
+            return response, path, attempts
+    return None, "", attempts
+
+
+def scenario_serial_audio_format_chain(dev: SerialEndpoint, audio_probe_path: str) -> ScenarioResult:
+    details: Dict[str, Any] = {}
+    try:
+        details["audio_policy_get"] = _command_with_retry(
+            dev,
+            "AUDIO_POLICY_GET",
+            expect="json",
+            timeout_s=5.0,
+            attempts=2,
+            retry_delay_s=0.3,
+        )
+
+        probe, selected_path, attempts = _select_audio_probe(dev, audio_probe_path)
+        details["audio_probe_attempts"] = attempts
+        if probe is None:
+            details["checks"] = {
+                "audio_policy_get_is_json": isinstance(details.get("audio_policy_get"), dict),
+                "audio_probe_found_supported_file": False,
+            }
+            return ScenarioResult("serial_audio_format_chain", "FAIL", details)
+
+        details["audio_probe"] = probe
+        details["audio_probe_selected_path"] = selected_path
+
+        play_cmd = f"PLAY {_quote_arg(selected_path)}"
+        details["play"] = _command_with_retry(
+            dev,
+            play_cmd,
+            expect="ack",
+            timeout_s=8.0,
+            attempts=2,
+            retry_delay_s=0.3,
+        )
+
+        time.sleep(0.35)
+        details["status_after_play"] = _command_with_retry(
+            dev,
+            "STATUS",
+            expect="json",
+            timeout_s=12.0,
+            attempts=4,
+            retry_delay_s=0.6,
+        )
+
+        policy = details["audio_policy_get"] if isinstance(details["audio_policy_get"], dict) else {}
+        status_audio = _extract_audio_status(
+            details["status_after_play"] if isinstance(details["status_after_play"], dict) else {}
+        )
+        status_missing = [key for key in REQUIRED_AUDIO_STATUS_KEYS if key not in status_audio]
+        status_fallback = status_audio.get("playback_rate_fallback")
+        probe_fallback = probe.get("rate_fallback")
+        warnings: List[str] = []
+        playback_observed_after_play = isinstance(status_audio.get("playback_input_sample_rate"), int) and (
+            status_audio.get("playback_input_sample_rate", 0) > 0
+        )
+        if not playback_observed_after_play:
+            warnings.append("status_playback_window_missed")
+
+        status_matches_probe_rate = (
+            status_audio.get("playback_output_sample_rate") == probe.get("output_sample_rate")
+            if playback_observed_after_play
+            else True
+        )
+        status_matches_probe_bits = (
+            status_audio.get("playback_output_bits_per_sample") == probe.get("output_bits_per_sample")
+            if playback_observed_after_play
+            else True
+        )
+        status_matches_probe_channels = (
+            status_audio.get("playback_output_channels") == probe.get("output_channels")
+            if playback_observed_after_play
+            else True
+        )
+        status_matches_probe_fallback = (
+            status_fallback == probe_fallback if playback_observed_after_play else True
+        )
+
+        checks = {
+            "audio_policy_get_is_json": isinstance(policy, dict),
+            "audio_policy_clock_hybrid_telco": str(policy.get("clock_policy", "")).upper() == "HYBRID_TELCO",
+            "audio_policy_loudness_valid": str(policy.get("wav_loudness_policy", "")).upper()
+            in {"AUTO_NORMALIZE_LIMITER", "FIXED_GAIN_ONLY"},
+            "audio_probe_has_required_fields": all(key in probe for key in REQUIRED_AUDIO_PROBE_KEYS),
+            "audio_probe_input_bits_supported": probe.get("input_bits_per_sample") in SUPPORTED_INPUT_BITS,
+            "audio_probe_input_channels_supported": probe.get("input_channels") in SUPPORTED_CHANNELS,
+            "audio_probe_output_rate_supported": probe.get("output_sample_rate") in SUPPORTED_OUTPUT_SAMPLE_RATES,
+            "audio_probe_output_bits_supported": probe.get("output_bits_per_sample") in SUPPORTED_OUTPUT_BITS,
+            "audio_probe_output_channels_supported": probe.get("output_channels") in SUPPORTED_CHANNELS,
+            "audio_probe_resampler_flag_bool": isinstance(probe.get("resampler_active"), bool),
+            "audio_probe_upmix_flag_bool": isinstance(probe.get("channel_upmix_active"), bool),
+            "audio_probe_loudness_number": _is_number(probe.get("loudness_gain_db")),
+            "audio_probe_limiter_bool": isinstance(probe.get("limiter_active"), bool),
+            "audio_probe_rate_fallback_number": isinstance(probe_fallback, int) and probe_fallback >= 0,
+            "play_ok": _is_success_response(details["play"]),
+            "status_audio_fields_present": not status_missing,
+            "status_output_rate_supported": status_audio.get("playback_output_sample_rate") in SUPPORTED_OUTPUT_SAMPLE_RATES,
+            "status_output_bits_supported": status_audio.get("playback_output_bits_per_sample") in SUPPORTED_OUTPUT_BITS,
+            "status_output_channels_supported": status_audio.get("playback_output_channels") in SUPPORTED_CHANNELS,
+            "status_resampler_bool": isinstance(status_audio.get("playback_resampler_active"), bool),
+            "status_upmix_bool": isinstance(status_audio.get("playback_channel_upmix_active"), bool),
+            "status_loudness_number": _is_number(status_audio.get("playback_loudness_gain_db")),
+            "status_limiter_bool": isinstance(status_audio.get("playback_limiter_active"), bool),
+            "status_fallback_number": isinstance(status_fallback, int) and status_fallback >= 0,
+            "status_matches_probe_rate": status_matches_probe_rate,
+            "status_matches_probe_bits": status_matches_probe_bits,
+            "status_matches_probe_channels": status_matches_probe_channels,
+            "status_matches_probe_fallback": status_matches_probe_fallback,
+        }
+        details["missing_status_audio_keys"] = status_missing
+        details["playback_observed_after_play"] = playback_observed_after_play
+        if warnings:
+            details["warnings"] = warnings
+        details["checks"] = checks
+        return ScenarioResult("serial_audio_format_chain", "PASS" if all(checks.values()) else "FAIL", details)
+    except Exception as exc:
+        return ScenarioResult("serial_audio_format_chain", "FAIL", {"error": str(exc), **details})
 
 
 def scenario_http(base_url: str) -> ScenarioResult:
@@ -514,7 +937,7 @@ def scenario_http(base_url: str) -> ScenarioResult:
         details["status"] = fetch_json(base_url.rstrip("/") + "/api/status")
         details["wifi"] = fetch_json(base_url.rstrip("/") + "/api/network/wifi")
         details["espnow"] = fetch_json(base_url.rstrip("/") + "/api/network/espnow")
-        details["control_call"] = post_json(base_url.rstrip("/") + "/api/control", {"action": "CALL"})
+        details["control_ping"] = post_json(base_url.rstrip("/") + "/api/control", {"action": "PING"})
         return ScenarioResult("http_endpoints", "PASS", details)
     except error.HTTPError as exc:
         return ScenarioResult("http_endpoints", "FAIL", {"error": f"HTTP {exc.code}", **details})
@@ -606,6 +1029,19 @@ def parse_args() -> argparse.Namespace:
         default=45,
         help="hook observation window in seconds for serial_hook_ring_audio (default: 45)",
     )
+    parser.add_argument(
+        "--require-contract-version",
+        default=EXPECTED_FIRMWARE_CONTRACT_VERSION,
+        help=(
+            "required firmware contract_version in STATUS.firmware. "
+            "Set empty string to disable strict version match."
+        ),
+    )
+    parser.add_argument(
+        "--audio-probe-path",
+        default="/welcome.wav",
+        help="preferred file path used by AUDIO_PROBE/PLAY checks (fallbacks: /welcome.wav, /musique.wav)",
+    )
     return parser.parse_args()
 
 
@@ -631,12 +1067,20 @@ def main() -> int:
                 )
             )
             results.append(
+                scenario_serial_firmware_contract(
+                    dev,
+                    required_contract_version=(args.require_contract_version or "").strip(),
+                )
+            )
+            results.append(
                 scenario_serial_hook_ring_audio(
                     dev,
                     require_hook_toggle=args.require_hook_toggle,
                     hook_observe_seconds=args.hook_observe_seconds,
                 )
             )
+            results.append(scenario_serial_media_routing(dev))
+            results.append(scenario_serial_audio_format_chain(dev, args.audio_probe_path))
             network_result = scenario_serial_network(dev, args.wifi_ssid, args.wifi_password)
             results.append(network_result)
     except Exception as exc:

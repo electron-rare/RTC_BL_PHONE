@@ -3,7 +3,6 @@
 #include <unity.h>
 #include "../src/AudioCodec.h"
 #include "telephony/DtmfDecoder.h"
-#include "props/PropsBridge.h"
 
 // --- AudioCodec tests ---
 void test_init() {
@@ -36,24 +35,14 @@ void test_dtmf_no_digit_on_silence() {
 	TEST_ASSERT_FALSE(called);
 }
 
-// --- PropsBridge tests ---
-void test_props_handle_ping() {
-	PropsBridge bridge;
-	JsonDocument doc;
-	doc["cmd"] = "PING";
-	bridge.handleCommand(doc.as<JsonVariantConst>());
-	TEST_ASSERT_TRUE(true); // Placeholder
-}
-
 void setup() {
-	UNITY_BEGIN();
+    UNITY_BEGIN();
 	RUN_TEST(test_init);
-	RUN_TEST(test_volume);
-	RUN_TEST(test_mute);
-	RUN_TEST(test_route);
-	RUN_TEST(test_dtmf_no_digit_on_silence);
-	RUN_TEST(test_props_handle_ping);
-	UNITY_END();
+    RUN_TEST(test_volume);
+    RUN_TEST(test_mute);
+    RUN_TEST(test_route);
+    RUN_TEST(test_dtmf_no_digit_on_silence);
+    UNITY_END();
 }
 
 void loop() {}

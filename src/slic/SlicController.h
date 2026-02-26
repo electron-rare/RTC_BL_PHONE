@@ -20,6 +20,7 @@ public:
     virtual void setLineEnabled(bool enabled) = 0;
     virtual bool isHookOff() const = 0;
     virtual void setPowerDown(bool enabled) = 0;
+    virtual bool isPowerDownEnabled() const = 0;
     virtual void tick() = 0;
 };
 

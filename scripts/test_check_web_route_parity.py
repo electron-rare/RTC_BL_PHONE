@@ -22,25 +22,23 @@ from scripts.check_web_route_parity import (
 class RouteParsingTest(unittest.TestCase):
     def test_detects_frontend_request_calls(self) -> None:
         source = """
-        const [wifi, mqtt] = await Promise.all([
+        const [wifi] = await Promise.all([
           requestJson("/api/network/wifi"),
-          requestJson("/api/network/mqtt", { method: "POST" }),
         ]);
         """
         routes = parse_frontend_routes(source)
         self.assertIn(("GET", "/api/network/wifi"), routes)
-        self.assertIn(("POST", "/api/network/mqtt"), routes)
 
     def test_detects_frontend_payload_requests(self) -> None:
         source = """
-        await requestJson("/api/network/mqtt/publish", {
+        await requestJson("/api/network/espnow/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic: "t" }),
+          body: JSON.stringify({ payload: { cmd: "STATUS" } }),
         });
         """
         routes = parse_frontend_routes(source)
-        self.assertIn(("POST", "/api/network/mqtt/publish"), routes)
+        self.assertIn(("POST", "/api/network/espnow/send"), routes)
 
     def test_detects_single_quotes(self) -> None:
         source = """
@@ -78,11 +76,10 @@ class BackendParsingTest(unittest.TestCase):
     def test_registered_command_detection(self) -> None:
         source = """
         g_dispatcher.registerCommand("WIFI_CONNECT", [](const String&) {});
-        g_dispatcher.registerCommand("MQTT_STATUS", [](const String&) {});
         g_dispatcher.registerCommand("PLAY", [](const String&) {});
         """
         commands = parse_registered_commands(source)
-        self.assertEqual(commands, {"WIFI_CONNECT", "MQTT_STATUS", "PLAY"})
+        self.assertEqual(commands, {"WIFI_CONNECT", "PLAY"})
 
 
 class ParityReportTest(unittest.TestCase):

@@ -3,15 +3,30 @@
 #include <Wire.h>
 
 #include <algorithm>
+#include <cmath>
 #include <initializer_list>
 
 namespace {
-uint8_t clampVolumeToReg(uint8_t percent) {
-    const uint8_t clamped = std::min<uint8_t>(100, percent);
-    // ES8388 DAC digital volume registers (0x1A/0x1B):
-    //   0x00 = 0 dB, 0xC0 = -96 dB.
-    return static_cast<uint8_t>(((100U - clamped) * 0xC0U) / 100U);
+constexpr float kEs8388VolumeDbMin = -96.0f;
+constexpr float kEs8388VolumeDbMax = 0.0f;
+
+float percentToVolumeDb(uint8_t percent) {
+    const float clamped = static_cast<float>(std::min<uint8_t>(100U, percent));
+    const float normalized = clamped / 100.0f;
+    // Linear in dB (perceptually logarithmic gain); 0%= -96 dB, 100%=0 dB.
+    return kEs8388VolumeDbMin + (kEs8388VolumeDbMax - kEs8388VolumeDbMin) * normalized;
 }
+
+uint8_t dbToVolumeReg(float db) {
+    const float clamped_db = std::max(kEs8388VolumeDbMin, std::min(kEs8388VolumeDbMax, db));
+    // ES8388: 0x00 = 0 dB, 0xC0 = -96 dB (0.5 dB/step).
+    return static_cast<uint8_t>(std::lround((-clamped_db) * 2.0f));
+}
+
+constexpr uint8_t kEs8388DacUnmuted = 0x32;      // DACCONTROL3 unmute (spec baseline)
+constexpr uint8_t kEs8388DacMuted = 0x36;        // DACCONTROL3 mute (spec example)
+constexpr uint8_t kEs8388DacRoute = 0xB8;        // DAC->mixer baseline path
+constexpr uint8_t kEs8388Output0dB = 0x1E;       // LOUT/ROUT driver volume 0dB
 }  // namespace
 
 bool Es8388Driver::begin(int sda_pin, int scl_pin, uint8_t address) {
@@ -27,8 +42,11 @@ bool Es8388Driver::begin(int sda_pin, int scl_pin, uint8_t address) {
         return ok;
     };
 
-    // ES8388 setup aligned with Espressif ADF defaults (codec in I2S slave mode).
-    // Register map: https://github.com/espressif/esp-adf (es8388 driver).
+    // ES8388 setup aligned with A1S board spec:
+    // - I2C 100 kHz on SDA=33/SCL=32
+    // - full-duplex I2S slave mode
+    // - 16-bit, ratio 256
+    // - conservative output driver values (0x1E = 0 dB)
     const bool ok = write_sequence(
         {
             {0x19, 0x04},  // DACCONTROL3: mute during init.
@@ -43,12 +61,12 @@ bool Es8388Driver::begin(int sda_pin, int scl_pin, uint8_t address) {
             {0x17, 0x18},  // DACCONTROL1: 16-bit I2S
             {0x18, 0x02},  // DACCONTROL2: single speed, ratio 256
             {0x26, 0x00},  // DACCONTROL16: DAC to mixer
-            {0x27, 0x90},  // DACCONTROL17: left DAC to left mixer
-            {0x2A, 0x90},  // DACCONTROL20: right DAC to right mixer
+            {0x27, kEs8388DacRoute},  // DACCONTROL17: DAC -> mixer path (spec baseline 0xB8)
+            {0x2A, kEs8388DacRoute},  // DACCONTROL20: DAC -> mixer path (spec baseline 0xB8)
             {0x2B, 0x80},  // DACCONTROL21
             {0x2D, 0x00},  // DACCONTROL23
-            {0x2E, 0x24},  // DACCONTROL24: analog output boosted (bench tuning)
-            {0x2F, 0x24},  // DACCONTROL25: analog output boosted (bench tuning)
+            {0x2E, kEs8388Output0dB},  // DACCONTROL24: LOUT1 volume = 0dB
+            {0x2F, kEs8388Output0dB},  // DACCONTROL25: ROUT1 volume = 0dB
             {0x30, 0x00},  // DACCONTROL26
             {0x31, 0x00},  // DACCONTROL27
             {0x04, 0x3C},  // DACPOWER: enable LOUT/ROUT
@@ -68,6 +86,7 @@ bool Es8388Driver::begin(int sda_pin, int scl_pin, uint8_t address) {
         return false;
     }
 
+    setMute(true);
     setVolume(volume_);
     setMute(muted_);
     setRoute(route_);
@@ -79,7 +98,8 @@ bool Es8388Driver::setVolume(uint8_t percent) {
     if (!ready_) {
         return false;
     }
-    const uint8_t reg = clampVolumeToReg(volume_);
+    const float db = percentToVolumeDb(volume_);
+    const uint8_t reg = dbToVolumeReg(db);
     // DAC digital volume controls.
     return writeReg(0x1A, reg) && writeReg(0x1B, reg);
 }
@@ -89,8 +109,8 @@ bool Es8388Driver::setMute(bool enabled) {
     if (!ready_) {
         return false;
     }
-    // DACCONTROL3 bit2 is mute.
-    return writeReg(0x19, enabled ? 0x04 : 0x00);
+    // DACCONTROL3 bit2 is mute; use spec baseline values.
+    return writeReg(0x19, static_cast<uint8_t>(enabled ? kEs8388DacMuted : kEs8388DacUnmuted));
 }
 
 bool Es8388Driver::setRoute(const String& route) {
@@ -102,14 +122,14 @@ bool Es8388Driver::setRoute(const String& route) {
 
     // Keep route as metadata and ensure output path is enabled for RTC.
     if (route_ == "rtc") {
-        return writeReg(0x26, 0x00) && writeReg(0x27, 0x90) && writeReg(0x2A, 0x90) &&
+        return writeReg(0x26, 0x00) && writeReg(0x27, kEs8388DacRoute) && writeReg(0x2A, kEs8388DacRoute) &&
                writeReg(0x04, 0x3C);
     }
     if (route_ == "none") {
         return writeReg(0x04, 0xC0);
     }
     route_ = "rtc";
-    return writeReg(0x26, 0x00) && writeReg(0x27, 0x90) && writeReg(0x2A, 0x90) &&
+    return writeReg(0x26, 0x00) && writeReg(0x27, kEs8388DacRoute) && writeReg(0x2A, kEs8388DacRoute) &&
            writeReg(0x04, 0x3C);
 }
 

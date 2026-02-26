@@ -1,0 +1,389 @@
+schema_version: '1.0'
+units:
+  frequency: Hz
+  time: s
+  level: dBm0 (optional, if you model levels)
+tone_library:
+  common_fields:
+    description: A tone is either continuous (cadence_s=null) or cadenced (cadence_s=[on,off,...]).
+    cadence_semantics: cadence_s alternates ON/OFF, starting with ON.
+    default_sample_rate_hz: 8000
+    default_mix: sum
+    default_wave: sine
+  profiles:
+    ETSI_EU:
+      region: EU (ETSI harmonized)
+      tolerances:
+        freq_pct: 1.5
+        cadence_pct: 10
+      levels:
+        note: ETSI tone definitions often omit absolute level; set per your audio
+          chain.
+      tones:
+        dial:
+          freqs_hz:
+          - 425
+          cadence_s: null
+          note: Standard EU dial tone
+        secondary_dial:
+          freqs_hz:
+          - 425
+          cadence_s: null
+          note: Commonly same as dial tone
+        special_dial_stutter:
+          freqs_hz:
+          - 425
+          cadence_s:
+          - 0.5
+          - 0.05
+          repeat: forever
+          note: Stutter dial tone (message waiting / special condition)
+        recall_dial:
+          freqs_hz:
+          - 425
+          cadence_s: null
+          note: Often same as dial tone on many networks/PBXs
+        ringback:
+          freqs_hz:
+          - 425
+          cadence_s:
+          - 1.0
+          - 4.0
+          repeat: forever
+        busy:
+          freqs_hz:
+          - 425
+          cadence_s:
+          - 0.5
+          - 0.5
+          repeat: forever
+        congestion:
+          freqs_hz:
+          - 425
+          cadence_s:
+          - 0.25
+          - 0.25
+          repeat: forever
+          aliases:
+          - reorder
+        call_waiting:
+          freqs_hz:
+          - 425
+          cadence_s:
+          - 0.2
+          - 0.2
+          - 0.2
+          - 3.0
+          repeat: forever
+          note: Common EU pattern; may vary by operator
+        confirmation:
+          freqs_hz:
+          - 425
+          cadence_s:
+          - 0.1
+          - 0.1
+          - 0.1
+          - 0.1
+          - 0.1
+          - 1.0
+          repeat: 1
+          note: Short confirmation bursts (PBX/service acknowledgement)
+        sit_intercept:
+          type: SIT
+          repeat: forever
+          sequence:
+          - freqs_hz:
+            - 950
+            duration_s: 0.33
+          - freqs_hz: []
+            duration_s: 0.03
+          - freqs_hz:
+            - 1400
+            duration_s: 0.33
+          - freqs_hz: []
+            duration_s: 0.03
+          - freqs_hz:
+            - 1800
+            duration_s: 0.33
+          - freqs_hz: []
+            duration_s: 1.0
+          note: ETSI-style SIT (3-tone sequence), used before announcement
+    FR_FR:
+      region: France (PSTN-style typical)
+      tolerances:
+        freq_pct: 1.5
+        cadence_pct: 10
+      tones:
+        dial:
+          freqs_hz:
+          - 440
+          cadence_s: null
+        secondary_dial:
+          freqs_hz:
+          - 440
+          cadence_s: null
+        special_dial_stutter:
+          freqs_hz:
+          - 440
+          cadence_s:
+          - 0.5
+          - 0.05
+          repeat: forever
+          note: Often close to EU stutter; operator/service dependent
+        recall_dial:
+          freqs_hz:
+          - 440
+          cadence_s: null
+        ringback:
+          freqs_hz:
+          - 440
+          cadence_s:
+          - 1.5
+          - 3.5
+          repeat: forever
+        busy:
+          freqs_hz:
+          - 440
+          cadence_s:
+          - 0.5
+          - 0.5
+          repeat: forever
+        congestion:
+          freqs_hz:
+          - 440
+          cadence_s:
+          - 0.25
+          - 0.25
+          repeat: forever
+          aliases:
+          - reorder
+        call_waiting:
+          freqs_hz:
+          - 440
+          cadence_s:
+          - 0.3
+          - 10.0
+          repeat: forever
+        sit_intercept:
+          type: SIT
+          repeat: forever
+          sequence:
+          - freqs_hz:
+            - 950
+            duration_s: 0.3
+          - freqs_hz: []
+            duration_s: 0.03
+          - freqs_hz:
+            - 1400
+            duration_s: 0.3
+          - freqs_hz: []
+            duration_s: 0.03
+          - freqs_hz:
+            - 1800
+            duration_s: 0.3
+          - freqs_hz: []
+            duration_s: 1.0
+          note: Common FR-style SIT prior to announcements; exact gaps vary
+    UK_GB:
+      region: United Kingdom (typical)
+      tolerances:
+        freq_pct: 1.5
+        cadence_pct: 10
+      tones:
+        dial:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s: null
+          variants:
+          - name: mains_hum_legacy
+            freqs_hz:
+            - 50
+            cadence_s: null
+          note: 350+440 is common; 50 Hz is a legacy/variant mention
+        secondary_dial:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s: null
+        special_dial_stutter:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s:
+          - 0.1
+          - 0.1
+          repeat: 10
+          then_continuous: true
+          note: Common PBX/VoIP stutter interpretation
+        recall_dial:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s: null
+        ringback:
+          freqs_hz:
+          - 400
+          cadence_s:
+          - 0.4
+          - 0.2
+          - 0.4
+          - 2.0
+          repeat: forever
+          note: UK ringback is often double-burst (varies)
+        busy:
+          freqs_hz:
+          - 400
+          cadence_s:
+          - 0.375
+          - 0.375
+          repeat: forever
+        congestion:
+          freqs_hz:
+          - 400
+          cadence_s:
+          - 0.4
+          - 0.35
+          - 0.225
+          - 0.525
+          repeat: forever
+          aliases:
+          - reorder
+        call_waiting:
+          freqs_hz:
+          - 400
+          cadence_s:
+          - 0.1
+          - 2.9
+          repeat: forever
+        sit_intercept:
+          type: SIT
+          repeat: forever
+          sequence:
+          - freqs_hz:
+            - 950
+            duration_s: 0.33
+          - freqs_hz: []
+            duration_s: 0.03
+          - freqs_hz:
+            - 1400
+            duration_s: 0.33
+          - freqs_hz: []
+            duration_s: 0.03
+          - freqs_hz:
+            - 1800
+            duration_s: 0.33
+          - freqs_hz: []
+            duration_s: 1.0
+    NA_US:
+      region: North America (US/Canada - precise tone plan style)
+      tolerances:
+        freq_pct: 0.5
+        cadence_pct: 10
+      levels:
+        per_component_dbm0: -13
+        composite_dbm0: -10
+        note: Typical targets; adapt to your audio chain and impedance model
+      tones:
+        dial:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s: null
+        secondary_dial:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s: null
+        recall_dial:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s:
+          - 0.1
+          - 0.1
+          - 0.1
+          - 0.1
+          - 0.1
+          - 0.1
+          repeat: 1
+          then_continuous: true
+          note: 3 short bursts then steady dial tone (common PBX/ATA behavior)
+        special_dial_mwi_stutter:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s:
+          - 0.1
+          - 0.1
+          repeat: 10
+          then_continuous: true
+          note: Message Waiting stutter dial tone
+        ringback:
+          freqs_hz:
+          - 440
+          - 480
+          cadence_s:
+          - 2.0
+          - 4.0
+          repeat: forever
+        busy:
+          freqs_hz:
+          - 480
+          - 620
+          cadence_s:
+          - 0.5
+          - 0.5
+          repeat: forever
+        reorder:
+          freqs_hz:
+          - 480
+          - 620
+          cadence_s:
+          - 0.25
+          - 0.25
+          repeat: forever
+          aliases:
+          - congestion
+        confirmation:
+          freqs_hz:
+          - 350
+          - 440
+          cadence_s:
+          - 0.1
+          - 0.1
+          - 0.1
+          - 0.1
+          - 0.1
+          - 0.1
+          repeat: 1
+          note: Feature confirmation tone (typical)
+        call_waiting:
+          freqs_hz:
+          - 440
+          cadence_s:
+          - 0.3
+          - 9.7
+          repeat: forever
+          note: Common NA call waiting beep
+        sit_intercept:
+          type: SIT
+          repeat: 1
+          sequence:
+          - freqs_hz:
+            - 950
+            duration_s: 0.33
+          - freqs_hz:
+            - 1400
+            duration_s: 0.33
+          - freqs_hz:
+            - 1800
+            duration_s: 0.33
+          note: Standard SIT triplet; often followed by announcement audio
+  recommended_defaults:
+    fallback_profile_order:
+    - ETSI_EU
+    - NA_US
+    if_unknown_region: ETSI_EU
+    if_pbx_voip_us_like: NA_US
+    if_france_emulation: FR_FR

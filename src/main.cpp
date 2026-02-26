@@ -1,11 +1,16 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <FFat.h>
 #include <esp_log.h>
 #include <WiFi.h>
+#include <mbedtls/base64.h>
+
+#include <algorithm>
 
 #include "audio/AudioEngine.h"
 #include "audio/Es8388Driver.h"
 #include "config/A252ConfigStore.h"
+#include "config/a1s_board_pins.h"
 #include "core/CommandDispatcher.h"
 #include "core/PlatformProfile.h"
 #include "props/EspNowBridge.h"
@@ -21,9 +26,20 @@
 namespace {
 
 constexpr uint32_t kSerialBaud = 115200;
-constexpr int kAudioAmpEnablePin = 21;
+constexpr int kAudioAmpEnablePin = A1S_PA_ENABLE;
+constexpr bool kAudioAmpActiveHigh = true;
 constexpr char kBootLogTag[] = "RTC_BOOT";
 constexpr bool kPrintHelpOnBoot = false;
+constexpr uint32_t kToneOffSuppressionMs = 1500U;
+constexpr uint32_t kHotlineDefaultLoopPauseMs = 3000U;
+constexpr uint16_t kHotlineMaxPauseMs = 10000U;
+constexpr char kFirmwareContractVersion[] = "A252_AUDIO_CHAIN_V2";
+constexpr char kFirmwareBuildId[] = __DATE__ " " __TIME__;
+
+#ifndef RTC_FIRMWARE_GIT_SHA
+#define RTC_FIRMWARE_GIT_SHA "unknown"
+#endif
+constexpr char kFirmwareGitSha[] = RTC_FIRMWARE_GIT_SHA;
 // Branch lock: API web access remains open (no Wi-Fi basic auth) for this flow.
 constexpr bool kWebAuthEnabledByDefault = false;
 
@@ -40,8 +56,9 @@ A252PinsConfig g_pins_cfg = A252ConfigStore::defaultPins();
 A252AudioConfig g_audio_cfg = A252ConfigStore::defaultAudio();
 EspNowPeerStore g_peer_store;
 EspNowCallMap g_espnow_call_map;
+DialMediaMap g_dial_media_map;
 String g_active_scene_id;
-String g_pending_espnow_call_audio_path;
+MediaRouteEntry g_pending_espnow_call_media;
 bool g_pending_espnow_call = false;
 
 Ks0835SlicController g_slic;
@@ -62,6 +79,181 @@ struct HardwareInitStatus {
 };
 
 HardwareInitStatus g_hw_status;
+
+struct ConfigMigrationStatus {
+    bool espnow_call_map_reset = false;
+    bool dial_media_map_reset = false;
+};
+
+ConfigMigrationStatus g_config_migrations;
+
+struct HotlineRuntimeState {
+    bool active = false;
+    String current_key;
+    String current_digits;
+    String current_source = "NONE";
+    MediaRouteEntry current_route;
+    bool pending_restart = false;
+    uint32_t next_restart_ms = 0U;
+    bool queued = false;
+    String queued_key;
+    String queued_digits;
+    String queued_source = "NONE";
+    MediaRouteEntry queued_route;
+    String last_notify_event;
+    bool last_notify_ok = false;
+};
+
+HotlineRuntimeState g_hotline;
+
+void setAmpEnabled(bool enabled) {
+    const bool level_high = (enabled == kAudioAmpActiveHigh);
+    digitalWrite(kAudioAmpEnablePin, level_high ? HIGH : LOW);
+}
+
+bool persistA252AudioConfig(const A252AudioConfig& cfg, const char* source);
+bool persistA252AudioConfigIfNeeded(const A252AudioConfig& cfg, const char* source);
+String dialSourceText(bool from_pulse);
+bool sendHotlineNotify(const char* state,
+                       const String& digit_key,
+                       const String& digits,
+                       const String& source,
+                       const MediaRouteEntry& route);
+void clearHotlineRuntimeState();
+void queueHotlineRoute(const String& digit_key,
+                       const String& digits,
+                       const String& source,
+                       const MediaRouteEntry& route);
+bool startHotlineRouteNow(const String& digit_key,
+                          const String& digits,
+                          const String& source,
+                          const MediaRouteEntry& route);
+void stopHotlineForHangup();
+void tickHotlineRuntime();
+
+void ensureA252AudioDefaults() {
+    if (g_profile != BoardProfile::ESP32_A252) {
+        return;
+    }
+
+    constexpr uint8_t kA252MinVolumePercent = 50;
+    bool updated = false;
+
+    if (g_audio_cfg.volume < kA252MinVolumePercent) {
+        Serial.printf("[RTC_BL_PHONE] correcting A252 audio volume %u -> %u\n",
+                      static_cast<unsigned>(g_audio_cfg.volume),
+                      static_cast<unsigned>(kA252MinVolumePercent));
+        g_audio_cfg.volume = kA252MinVolumePercent;
+        updated = true;
+    }
+
+    if (g_audio_cfg.sample_rate != 8000U) {
+        Serial.printf("[RTC_BL_PHONE] correcting A252 sample_rate %u -> 8000Hz for tone-plan compatibility\n",
+                      static_cast<unsigned>(g_audio_cfg.sample_rate));
+        g_audio_cfg.sample_rate = 8000;
+        updated = true;
+    }
+
+    if (g_audio_cfg.bits_per_sample != 16U) {
+        Serial.printf("[RTC_BL_PHONE] correcting A252 bits_per_sample %u -> 16 (codec output lock)\n",
+                      static_cast<unsigned>(g_audio_cfg.bits_per_sample));
+        g_audio_cfg.bits_per_sample = 16;
+        updated = true;
+    }
+
+    String clock_policy = g_audio_cfg.clock_policy;
+    clock_policy.trim();
+    clock_policy.toUpperCase();
+    if (clock_policy != "HYBRID_TELCO") {
+        Serial.printf("[RTC_BL_PHONE] correcting A252 clock_policy %s -> HYBRID_TELCO\n", g_audio_cfg.clock_policy.c_str());
+        g_audio_cfg.clock_policy = "HYBRID_TELCO";
+        updated = true;
+    } else {
+        g_audio_cfg.clock_policy = "HYBRID_TELCO";
+    }
+
+    String wav_policy = g_audio_cfg.wav_loudness_policy;
+    wav_policy.trim();
+    wav_policy.toUpperCase();
+    if (wav_policy != "AUTO_NORMALIZE_LIMITER" && wav_policy != "FIXED_GAIN_ONLY") {
+        Serial.printf("[RTC_BL_PHONE] correcting wav_loudness_policy %s -> AUTO_NORMALIZE_LIMITER\n",
+                      g_audio_cfg.wav_loudness_policy.c_str());
+        g_audio_cfg.wav_loudness_policy = "AUTO_NORMALIZE_LIMITER";
+        updated = true;
+    } else {
+        g_audio_cfg.wav_loudness_policy = wav_policy;
+    }
+
+    const int16_t prev_rms = g_audio_cfg.wav_target_rms_dbfs;
+    if (g_audio_cfg.wav_target_rms_dbfs < -36) {
+        g_audio_cfg.wav_target_rms_dbfs = -36;
+    } else if (g_audio_cfg.wav_target_rms_dbfs > -6) {
+        g_audio_cfg.wav_target_rms_dbfs = -6;
+    }
+    updated = updated || (prev_rms != g_audio_cfg.wav_target_rms_dbfs);
+
+    const int16_t prev_ceiling = g_audio_cfg.wav_limiter_ceiling_dbfs;
+    if (g_audio_cfg.wav_limiter_ceiling_dbfs < -12) {
+        g_audio_cfg.wav_limiter_ceiling_dbfs = -12;
+    } else if (g_audio_cfg.wav_limiter_ceiling_dbfs > 0) {
+        g_audio_cfg.wav_limiter_ceiling_dbfs = 0;
+    }
+    updated = updated || (prev_ceiling != g_audio_cfg.wav_limiter_ceiling_dbfs);
+
+    const uint16_t prev_attack = g_audio_cfg.wav_limiter_attack_ms;
+    g_audio_cfg.wav_limiter_attack_ms =
+        std::max<uint16_t>(1U, std::min<uint16_t>(1000U, g_audio_cfg.wav_limiter_attack_ms));
+    updated = updated || (prev_attack != g_audio_cfg.wav_limiter_attack_ms);
+
+    const uint16_t prev_release = g_audio_cfg.wav_limiter_release_ms;
+    g_audio_cfg.wav_limiter_release_ms =
+        std::max<uint16_t>(1U, std::min<uint16_t>(5000U, g_audio_cfg.wav_limiter_release_ms));
+    updated = updated || (prev_release != g_audio_cfg.wav_limiter_release_ms);
+
+    if (!updated) {
+        return;
+    }
+    if (!persistA252AudioConfigIfNeeded(g_audio_cfg, "A252Defaults")) {
+        Serial.println("[RTC_BL_PHONE] failed to persist corrected A252 audio config");
+    }
+}
+
+bool persistA252AudioConfig(const A252AudioConfig& cfg, const char* source) {
+    const uint8_t previous_volume = g_audio_cfg.volume;
+    String error;
+    if (!A252ConfigStore::saveAudio(cfg, &error)) {
+        Serial.printf(
+            "[RTC_BL_PHONE] failed to persist audio config from %s: %s\n",
+            source,
+            error.c_str()
+        );
+        return false;
+    }
+
+    g_audio_cfg = cfg;
+    if (previous_volume != g_audio_cfg.volume) {
+        Serial.printf("[RTC_BL_PHONE] audio volume persisted via %s: %u -> %u\n",
+                      source,
+                      static_cast<unsigned>(previous_volume),
+                      static_cast<unsigned>(g_audio_cfg.volume));
+    }
+    return true;
+}
+
+bool persistA252AudioConfigIfNeeded(const A252AudioConfig& cfg, const char* source) {
+    if (cfg.volume != g_audio_cfg.volume) {
+        return persistA252AudioConfig(cfg, source);
+    }
+
+    String error;
+    if (!A252ConfigStore::saveAudio(cfg, &error)) {
+        Serial.printf("[RTC_BL_PHONE] failed to persist audio config from %s: %s\n", source, error.c_str());
+        return false;
+    }
+
+    g_audio_cfg = cfg;
+    return true;
+}
 
 DispatchResponse makeResponse(bool ok, const String& code) {
     DispatchResponse res;
@@ -174,73 +366,561 @@ bool extractBridgeCommand(JsonVariantConst payload, String& out_cmd, uint8_t dep
     return false;
 }
 
-String sanitizeAudioPath(const String& raw_path) {
+String sanitizeFsPath(const String& raw_path) {
     String path = raw_path;
     path.trim();
     if (path.isEmpty()) {
         return "";
     }
-
-    if (path.length() >= 2U && path[0] == '\"' && path[path.length() - 1U] == '\"') {
+    if (path.length() >= 2U && path[0] == '"' && path[path.length() - 1U] == '"') {
         path = path.substring(1U, path.length() - 1U);
     }
     path.trim();
-    if (path.isEmpty()) {
+    if (path.isEmpty() || path == "/" || path.startsWith("{") || path.startsWith("[")) {
         return "";
     }
-
-    if (path.startsWith("{") || path.startsWith("[") || path == "null") {
-        return "";
-    }
-
     if (!path.startsWith("/")) {
         path = "/" + path;
     }
-    path.toLowerCase();
-    if (!path.endsWith(".wav") && !path.endsWith(".mp3")) {
-        path += ".wav";
+    if (path.indexOf("..") >= 0) {
+        return "";
     }
     return path;
 }
 
-void initDefaultEspNowCallMap(EspNowCallMap& out_map) {
-    out_map.clear();
-    out_map.push_back({"LA_OK", "/la_ok.wav"});
-    out_map.push_back({"LA_BUSY", "/la_busy.wav"});
+bool ensureFfatMounted() {
+    if (FFat.begin(false)) {
+        return true;
+    }
+    return FFat.begin(true);
 }
 
-String resolveEspNowCallAudioPath(const String& message, const String& args) {
+bool ensureParentDirsOnFfat(const String& absolute_path) {
+    if (!absolute_path.startsWith("/")) {
+        return false;
+    }
+    int idx = 1;
+    while (idx > 0 && idx < absolute_path.length()) {
+        idx = absolute_path.indexOf('/', idx);
+        if (idx < 0) {
+            break;
+        }
+        const String dir = absolute_path.substring(0, idx);
+        if (!dir.isEmpty() && !FFat.exists(dir)) {
+            if (!FFat.mkdir(dir)) {
+                return false;
+            }
+        }
+        ++idx;
+    }
+    return true;
+}
+
+bool decodeBase64ToBytes(const String& b64, std::vector<uint8_t>& out) {
+    out.clear();
+    if (b64.isEmpty()) {
+        return true;
+    }
+    size_t out_len = 0U;
+    out.resize(((b64.length() + 3U) / 4U) * 3U + 4U);
+    const int ret = mbedtls_base64_decode(out.data(),
+                                          out.size(),
+                                          &out_len,
+                                          reinterpret_cast<const unsigned char*>(b64.c_str()),
+                                          b64.length());
+    if (ret != 0) {
+        out.clear();
+        return false;
+    }
+    out.resize(out_len);
+    return true;
+}
+
+bool isDialMapNumberKey(const String& number) {
+    if (number.isEmpty() || number.length() > 20U) {
+        return false;
+    }
+    for (size_t i = 0; i < number.length(); ++i) {
+        if (number[i] < '0' || number[i] > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool parsePlaybackPolicyFromObject(JsonObjectConst obj, FilePlaybackPolicy& out_policy) {
+    out_policy = FilePlaybackPolicy{};
+    bool loop = false;
+    int pause_ms = 0;
+
+    if (obj["playback"]["loop"].is<bool>()) {
+        loop = obj["playback"]["loop"].as<bool>();
+    } else if (obj["loop"].is<bool>()) {
+        loop = obj["loop"].as<bool>();
+    }
+
+    if (obj["playback"]["pause_ms"].is<int>()) {
+        pause_ms = obj["playback"]["pause_ms"].as<int>();
+    } else if (obj["pause_ms"].is<int>()) {
+        pause_ms = obj["pause_ms"].as<int>();
+    }
+
+    if (pause_ms < 0) {
+        return false;
+    }
+    if (pause_ms > static_cast<int>(kHotlineMaxPauseMs)) {
+        return false;
+    }
+
+    out_policy.loop = loop;
+    out_policy.pause_ms = static_cast<uint16_t>(pause_ms);
+    return true;
+}
+
+void initDefaultEspNowCallMap(EspNowCallMap& out_map) {
+    out_map.clear();
+    EspNowCallMapEntry la_ok;
+    la_ok.keyword = "LA_OK";
+    la_ok.route.kind = MediaRouteKind::TONE;
+    la_ok.route.tone.profile = ToneProfile::FR_FR;
+    la_ok.route.tone.event = ToneEvent::DIAL;
+    out_map.push_back(la_ok);
+
+    EspNowCallMapEntry la_busy;
+    la_busy.keyword = "LA_BUSY";
+    la_busy.route.kind = MediaRouteKind::TONE;
+    la_busy.route.tone.profile = ToneProfile::FR_FR;
+    la_busy.route.tone.event = ToneEvent::BUSY;
+    out_map.push_back(la_busy);
+}
+
+void initDefaultDialMediaMap(DialMediaMap& out_map) {
+    out_map.clear();
+    auto add_default = [&](const char* key, const char* path) {
+        DialMediaMapEntry entry;
+        entry.number = key;
+        entry.route.kind = MediaRouteKind::FILE;
+        entry.route.path = sanitizeMediaPath(path);
+        entry.route.source = MediaSource::AUTO;
+        entry.route.playback.loop = true;
+        entry.route.playback.pause_ms = static_cast<uint16_t>(kHotlineDefaultLoopPauseMs);
+        out_map.push_back(entry);
+    };
+    add_default("1", "/welcome.wav");
+    add_default("2", "/radio.wav");
+    add_default("3", "/souffle.wav");
+}
+
+bool findDialMediaRoute(const String& digits, MediaRouteEntry& out_route) {
+    for (const DialMediaMapEntry& entry : g_dial_media_map) {
+        if (entry.number == digits && mediaRouteHasPayload(entry.route)) {
+            out_route = entry.route;
+            return true;
+        }
+    }
+    return false;
+}
+
+DialRouteMatch resolveDialRouteMatch(const String& digits) {
+    if (digits.isEmpty()) {
+        return DialRouteMatch::NONE;
+    }
+    bool exact = false;
+    bool longer_prefix = false;
+    bool prefix_only = false;
+    for (const DialMediaMapEntry& entry : g_dial_media_map) {
+        if (entry.number.isEmpty() || !mediaRouteHasPayload(entry.route)) {
+            continue;
+        }
+        if (entry.number == digits) {
+            exact = true;
+            continue;
+        }
+        if (entry.number.startsWith(digits)) {
+            if (entry.number.length() > digits.length()) {
+                longer_prefix = true;
+            } else {
+                prefix_only = true;
+            }
+        }
+    }
+    if (exact && longer_prefix) {
+        return DialRouteMatch::EXACT_AND_PREFIX;
+    }
+    if (exact) {
+        return DialRouteMatch::EXACT;
+    }
+    if (longer_prefix || prefix_only) {
+        return DialRouteMatch::PREFIX;
+    }
+    return DialRouteMatch::NONE;
+}
+
+bool triggerHotlineRouteForDigits(const String& digits, bool from_pulse, String* out_state = nullptr) {
+    if (out_state != nullptr) {
+        *out_state = "";
+    }
+    if (!isDialMapNumberKey(digits)) {
+        if (out_state != nullptr) {
+            *out_state = "invalid_number";
+        }
+        return false;
+    }
+
+    MediaRouteEntry route;
+    if (!findDialMediaRoute(digits, route)) {
+        if (out_state != nullptr) {
+            *out_state = "missing_route";
+        }
+        return false;
+    }
+    if (route.kind == MediaRouteKind::FILE) {
+        // Hotline file routes are cyclic until hangup: play file, wait, replay.
+        route.playback.loop = true;
+        route.playback.pause_ms = static_cast<uint16_t>(kHotlineDefaultLoopPauseMs);
+    }
+
+    const String source = dialSourceText(from_pulse);
+    if (g_hotline.active) {
+        queueHotlineRoute(digits, digits, source, route);
+        if (out_state != nullptr) {
+            *out_state = "queued";
+        }
+        return true;
+    }
+
+    const bool ok = startHotlineRouteNow(digits, digits, source, route);
+    if (out_state != nullptr) {
+        *out_state = ok ? "triggered" : "play_failed";
+    }
+    return ok;
+}
+
+bool parseMediaRouteFromArgs(const String& args, MediaRouteEntry& out_route, bool allow_tone_route = true) {
+    out_route = MediaRouteEntry{};
+    out_route.kind = MediaRouteKind::FILE;
+    out_route.source = MediaSource::AUTO;
+
+    String work = args;
+    work.trim();
+    if (work.isEmpty()) {
+        return false;
+    }
+
+    if (work.startsWith("{")) {
+        JsonDocument doc;
+        if (deserializeJson(doc, work) != DeserializationError::Ok || !doc.is<JsonObject>()) {
+            return false;
+        }
+        JsonObjectConst obj = doc.as<JsonObjectConst>();
+        JsonObjectConst audio = obj["audio"].is<JsonObjectConst>() ? obj["audio"].as<JsonObjectConst>() : obj;
+
+        MediaRouteKind kind = MediaRouteKind::FILE;
+        if (audio["kind"].is<const char*>()) {
+            if (!parseMediaRouteKind(audio["kind"].as<const char*>(), kind)) {
+                return false;
+            }
+        } else if (allow_tone_route && audio["profile"].is<const char*>() && audio["event"].is<const char*>()) {
+            kind = MediaRouteKind::TONE;
+        }
+
+        if (kind == MediaRouteKind::TONE) {
+            if (!allow_tone_route || !audio["profile"].is<const char*>() || !audio["event"].is<const char*>()) {
+                return false;
+            }
+            out_route.kind = MediaRouteKind::TONE;
+            if (!parseToneProfile(audio["profile"].as<const char*>(), out_route.tone.profile)) {
+                return false;
+            }
+            if (!parseToneEvent(audio["event"].as<const char*>(), out_route.tone.event)) {
+                return false;
+            }
+            return out_route.tone.profile != ToneProfile::NONE && out_route.tone.event != ToneEvent::NONE;
+        }
+
+        if (audio["path"].is<const char*>()) {
+            out_route.kind = MediaRouteKind::FILE;
+            out_route.path = sanitizeMediaPath(audio["path"].as<const char*>());
+        }
+        if (audio["source"].is<const char*>()) {
+            MediaSource parsed = MediaSource::AUTO;
+            if (!parseMediaSource(audio["source"].as<const char*>(), parsed)) {
+                return false;
+            }
+            out_route.source = parsed;
+        }
+        if (!parsePlaybackPolicyFromObject(audio, out_route.playback)) {
+            return false;
+        }
+        return !out_route.path.isEmpty();
+    }
+
+    String lower = work;
+    lower.toLowerCase();
+    if (lower.startsWith("sd:")) {
+        out_route.kind = MediaRouteKind::FILE;
+        out_route.source = MediaSource::SD;
+        out_route.path = sanitizeMediaPath(work.substring(3));
+        return !out_route.path.isEmpty();
+    }
+    if (lower.startsWith("littlefs:")) {
+        out_route.kind = MediaRouteKind::FILE;
+        out_route.source = MediaSource::LITTLEFS;
+        out_route.path = sanitizeMediaPath(work.substring(9));
+        return !out_route.path.isEmpty();
+    }
+    if (lower.startsWith("auto:")) {
+        out_route.kind = MediaRouteKind::FILE;
+        out_route.source = MediaSource::AUTO;
+        out_route.path = sanitizeMediaPath(work.substring(5));
+        return !out_route.path.isEmpty();
+    }
+
+    if (allow_tone_route && lower.startsWith("tone:")) {
+        const String tone_spec = work.substring(5);
+        String first;
+        String rest;
+        if (!splitFirstToken(tone_spec, first, rest)) {
+            return false;
+        }
+        ToneProfile profile = ToneProfile::FR_FR;
+        ToneEvent event = ToneEvent::NONE;
+        if (rest.isEmpty()) {
+            if (!parseToneEvent(first, event)) {
+                return false;
+            }
+        } else {
+            if (!parseToneProfile(first, profile)) {
+                return false;
+            }
+            if (!parseToneEvent(rest, event)) {
+                return false;
+            }
+        }
+        out_route.kind = MediaRouteKind::TONE;
+        out_route.tone.profile = profile;
+        out_route.tone.event = event;
+        return out_route.tone.profile != ToneProfile::NONE && out_route.tone.event != ToneEvent::NONE;
+    }
+
+    out_route.kind = MediaRouteKind::FILE;
+    out_route.path = sanitizeMediaPath(work);
+    return !out_route.path.isEmpty();
+}
+
+bool playMediaRoute(const MediaRouteEntry& route) {
+    if (route.kind == MediaRouteKind::TONE) {
+        return g_audio.playTone(route.tone.profile, route.tone.event);
+    }
+    if (route.path.isEmpty()) {
+        return false;
+    }
+    if (isLegacyToneWavPath(route.path)) {
+        Serial.printf("[RTC_BL_PHONE] rejected legacy tone wav path: %s\n", route.path.c_str());
+        return false;
+    }
+    return g_audio.playFileFromSource(route.path.c_str(), route.source);
+}
+
+String dialSourceText(bool from_pulse) {
+    return from_pulse ? "PULSE" : "DTMF";
+}
+
+bool sendHotlineNotify(const char* state, const String& digit_key, const String& digits, const String& source, const MediaRouteEntry& route) {
+    JsonDocument doc;
+    doc["proto"] = "rtcbl/1";
+    doc["type"] = "event";
+    doc["event"] = "hotline_script";
+    doc["id"] = String(millis());
+    JsonObject payload = doc["payload"].to<JsonObject>();
+    payload["state"] = state == nullptr ? "" : state;
+    payload["digit_key"] = digit_key;
+    payload["digits"] = digits;
+    payload["source"] = source;
+    JsonObject out_route = payload["route"].to<JsonObject>();
+    out_route["kind"] = mediaRouteKindToString(route.kind);
+    if (route.kind == MediaRouteKind::TONE) {
+        out_route["profile"] = toneProfileToString(route.tone.profile);
+        out_route["event"] = toneEventToString(route.tone.event);
+    } else {
+        out_route["path"] = route.path;
+        out_route["source"] = mediaSourceToString(route.source);
+        JsonObject playback = out_route["playback"].to<JsonObject>();
+        playback["loop"] = route.playback.loop;
+        playback["pause_ms"] = route.playback.pause_ms;
+    }
+
+    String wire;
+    serializeJson(doc, wire);
+    const bool ok = g_espnow.sendJson("broadcast", wire);
+    g_hotline.last_notify_event = state == nullptr ? "" : state;
+    g_hotline.last_notify_ok = ok;
+    if (!ok) {
+        Serial.printf("[Hotline] notify failed state=%s\n", state == nullptr ? "" : state);
+    }
+    return ok;
+}
+
+void clearHotlineRuntimeState() {
+    const String last_event = g_hotline.last_notify_event;
+    const bool last_ok = g_hotline.last_notify_ok;
+    g_hotline = HotlineRuntimeState{};
+    g_hotline.last_notify_event = last_event;
+    g_hotline.last_notify_ok = last_ok;
+}
+
+void queueHotlineRoute(const String& digit_key, const String& digits, const String& source, const MediaRouteEntry& route) {
+    g_hotline.queued = true;
+    g_hotline.queued_key = digit_key;
+    g_hotline.queued_digits = digits;
+    g_hotline.queued_source = source;
+    g_hotline.queued_route = route;
+    sendHotlineNotify("queued", digit_key, digits, source, route);
+}
+
+bool startHotlineRouteNow(const String& digit_key, const String& digits, const String& source, const MediaRouteEntry& route) {
+    const bool ok = playMediaRoute(route);
+    if (!ok) {
+        return false;
+    }
+    g_hotline.active = true;
+    g_hotline.current_key = digit_key;
+    g_hotline.current_digits = digits;
+    g_hotline.current_source = source;
+    g_hotline.current_route = route;
+    g_hotline.pending_restart = false;
+    g_hotline.next_restart_ms = 0U;
+    sendHotlineNotify("triggered", digit_key, digits, source, route);
+    return true;
+}
+
+void stopHotlineForHangup() {
+    if (!g_hotline.active && !g_hotline.queued && !g_hotline.pending_restart) {
+        return;
+    }
+    g_audio.stopPlayback();
+    g_audio.stopTone();
+    sendHotlineNotify(
+        "stopped_hangup",
+        g_hotline.current_key,
+        g_hotline.current_digits,
+        g_hotline.current_source,
+        g_hotline.current_route);
+    clearHotlineRuntimeState();
+}
+
+void tickHotlineRuntime() {
+    if (!g_slic.isHookOff()) {
+        stopHotlineForHangup();
+        return;
+    }
+    if (!g_hotline.active) {
+        return;
+    }
+
+    if (g_hotline.current_route.kind == MediaRouteKind::TONE) {
+        if (g_hotline.queued) {
+            // Tone routes can be effectively unbounded; stop to switch deterministically
+            // to the queued route on next restart.
+            g_audio.stopTone();
+        } else if (g_audio.isToneRenderingActive()) {
+            return;
+        }
+    } else if (g_audio.isPlaying()) {
+        return;
+    }
+
+    const uint32_t now = millis();
+    if (!g_hotline.pending_restart) {
+        const bool should_continue = g_hotline.current_route.playback.loop || g_hotline.queued;
+        if (!should_continue) {
+            clearHotlineRuntimeState();
+            return;
+        }
+        uint16_t pause_ms = g_hotline.current_route.playback.pause_ms;
+        if (pause_ms == 0U) {
+            pause_ms = static_cast<uint16_t>(kHotlineDefaultLoopPauseMs);
+        }
+        g_hotline.pending_restart = true;
+        g_hotline.next_restart_ms = now + pause_ms;
+        return;
+    }
+
+    if (now < g_hotline.next_restart_ms) {
+        return;
+    }
+
+    if (g_hotline.queued) {
+        g_hotline.current_key = g_hotline.queued_key;
+        g_hotline.current_digits = g_hotline.queued_digits;
+        g_hotline.current_source = g_hotline.queued_source;
+        g_hotline.current_route = g_hotline.queued_route;
+        g_hotline.queued = false;
+        g_hotline.queued_key = "";
+        g_hotline.queued_digits = "";
+        g_hotline.queued_source = "NONE";
+        g_hotline.queued_route = MediaRouteEntry{};
+    }
+
+    if (!playMediaRoute(g_hotline.current_route)) {
+        Serial.printf("[Hotline] restart failed key=%s digits=%s\n", g_hotline.current_key.c_str(), g_hotline.current_digits.c_str());
+        clearHotlineRuntimeState();
+        return;
+    }
+    g_hotline.pending_restart = false;
+    g_hotline.next_restart_ms = 0U;
+}
+
+MediaRouteEntry resolveEspNowMediaRoute(const String& message, const String& args) {
+    MediaRouteEntry route;
+    route.kind = MediaRouteKind::FILE;
+    route.path = "";
+    route.source = MediaSource::AUTO;
+
     String normalized_message = message;
     normalized_message.trim();
     normalized_message.toUpperCase();
 
-    if (!args.isEmpty()) {
-        return sanitizeAudioPath(args);
+    if (parseMediaRouteFromArgs(args, route, true) && mediaRouteHasPayload(route)) {
+        return route;
     }
 
     for (const EspNowCallMapEntry& entry : g_espnow_call_map) {
         if (!entry.keyword.equalsIgnoreCase(normalized_message)) {
             continue;
         }
-        const String mapped = sanitizeAudioPath(entry.path);
-        if (!mapped.isEmpty()) {
-            return mapped;
+        if (mediaRouteHasPayload(entry.route)) {
+            route = entry.route;
+            return route;
         }
     }
 
     if (normalized_message.isEmpty()) {
-        return "";
+        return route;
     }
     normalized_message.toLowerCase();
-
-    return "/" + normalized_message + ".wav";
+    route.kind = MediaRouteKind::FILE;
+    route.path = "/" + normalized_message + ".wav";
+    route.source = MediaSource::AUTO;
+    return route;
 }
 
-DispatchResponse makeEspNowCallResponse(bool ok, const String& message, const String& path, bool pending) {
+DispatchResponse makeEspNowCallResponse(bool ok, const String& message, const MediaRouteEntry& route, bool pending) {
     DispatchResponse res = makeResponse(ok, ok ? (pending ? "ESPNOW_CALL_RINGING" : "ESPNOW_CALL_PLAY") : "ESPNOW_CALL_FAILED");
     JsonDocument payload;
     payload["call"] = message;
-    payload["audio"] = path;
+    JsonObject audio = payload["audio"].to<JsonObject>();
+    audio["kind"] = mediaRouteKindToString(route.kind);
+    if (route.kind == MediaRouteKind::TONE) {
+        audio["profile"] = toneProfileToString(route.tone.profile);
+        audio["event"] = toneEventToString(route.tone.event);
+    } else {
+        audio["path"] = route.path;
+        audio["source"] = mediaSourceToString(route.source);
+        JsonObject playback = audio["playback"].to<JsonObject>();
+        playback["loop"] = route.playback.loop;
+        playback["pause_ms"] = route.playback.pause_ms;
+    }
     payload["pending"] = pending;
     res.json = "";
     res.raw = "";
@@ -270,17 +950,17 @@ bool handleIncomingEspNowCallCommand(const String& command_line, DispatchRespons
         return true;
     }
 
-    const String audio_path = resolveEspNowCallAudioPath(keyword, args);
-    if (audio_path.isEmpty()) {
+    const MediaRouteEntry route = resolveEspNowMediaRoute(keyword, args);
+    if (!mediaRouteHasPayload(route)) {
         out = makeResponse(false, "ESPNOW_CALL_NO_AUDIO");
         return true;
     }
 
-    g_pending_espnow_call_audio_path = audio_path;
+    g_pending_espnow_call_media = route;
     g_pending_espnow_call = true;
     g_telephony.triggerIncomingRing();
 
-    out = makeEspNowCallResponse(true, keyword, audio_path, true);
+    out = makeEspNowCallResponse(true, keyword, route, true);
     return true;
 }
 
@@ -435,10 +1115,7 @@ AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig
     AudioConfig cfg;
     cfg.port = I2S_NUM_0;
     cfg.sample_rate = audio_cfg.sample_rate;
-    cfg.bits_per_sample = (audio_cfg.bits_per_sample == 32)
-                              ? I2S_BITS_PER_SAMPLE_32BIT
-                              : (audio_cfg.bits_per_sample == 24) ? I2S_BITS_PER_SAMPLE_24BIT
-                                                                    : I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
     cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
     cfg.bck_pin = pins_cfg.i2s_bck;
     cfg.ws_pin = pins_cfg.i2s_ws;
@@ -453,6 +1130,12 @@ AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig
     cfg.adc_fft_ignore_high_bin = audio_cfg.adc_fft_ignore_high_bin;
     cfg.dma_buf_count = 8;
     cfg.dma_buf_len = 256;
+    cfg.hybrid_telco_clock_policy = true;
+    cfg.wav_auto_normalize_limiter = !audio_cfg.wav_loudness_policy.equalsIgnoreCase("FIXED_GAIN_ONLY");
+    cfg.wav_target_rms_dbfs = audio_cfg.wav_target_rms_dbfs;
+    cfg.wav_limiter_ceiling_dbfs = audio_cfg.wav_limiter_ceiling_dbfs;
+    cfg.wav_limiter_attack_ms = audio_cfg.wav_limiter_attack_ms;
+    cfg.wav_limiter_release_ms = audio_cfg.wav_limiter_release_ms;
     return cfg;
 }
 
@@ -509,26 +1192,48 @@ bool applyHardwareConfig() {
         audio_ok = g_audio.begin(audio);
     }
     g_audio.resetMetrics();
+    clearHotlineRuntimeState();
 
     g_telephony.begin(g_profile, g_slic, g_audio);
-    g_telephony.setDialCallback([](const String& number) {
-        Serial.printf("[Telephony] dial callback disabled for routing: %s\n", number.c_str());
-        return false;
+    g_telephony.setDialMatchCallback([](const String& digits) {
+        return resolveDialRouteMatch(digits);
+    });
+    g_telephony.setDialCallback([](const String& number, bool from_pulse) {
+        String state;
+        const bool ok = triggerHotlineRouteForDigits(number, from_pulse, &state);
+        Serial.printf("[Telephony] dial route number=%s source=%s state=%s ok=%s\n",
+                      number.c_str(),
+                      from_pulse ? "PULSE" : "DTMF",
+                      state.c_str(),
+                      ok ? "true" : "false");
+        if (!ok) {
+            const bool busy_ok = g_audio.playTone(ToneProfile::FR_FR, ToneEvent::BUSY);
+            Serial.printf("[Telephony] busy tone ok=%s\n", busy_ok ? "true" : "false");
+        }
+        return ok;
     });
     g_telephony.setAnswerCallback([]() {
-        if (!g_pending_espnow_call || g_pending_espnow_call_audio_path.isEmpty()) {
+        if (!g_pending_espnow_call || !mediaRouteHasPayload(g_pending_espnow_call_media)) {
             Serial.println("[Telephony] answer callback disabled");
             return false;
         }
 
-        const String audio_path = g_pending_espnow_call_audio_path;
-        g_pending_espnow_call_audio_path = "";
+        const MediaRouteEntry media = g_pending_espnow_call_media;
+        g_pending_espnow_call_media = MediaRouteEntry{};
         g_pending_espnow_call = false;
 
-        const bool ok = g_audio.playFile(audio_path.c_str());
-        Serial.printf("[Telephony] answer callback -> play '%s' ok=%s\n",
-                      audio_path.c_str(),
-                      ok ? "true" : "false");
+        const bool ok = playMediaRoute(media);
+        if (media.kind == MediaRouteKind::TONE) {
+            Serial.printf("[Telephony] answer callback -> play tone profile=%s event=%s ok=%s\n",
+                          toneProfileToString(media.tone.profile),
+                          toneEventToString(media.tone.event),
+                          ok ? "true" : "false");
+        } else {
+            Serial.printf("[Telephony] answer callback -> play file '%s' source=%s ok=%s\n",
+                          media.path.c_str(),
+                          mediaSourceToString(media.source),
+                          ok ? "true" : "false");
+        }
         return ok;
     });
 
@@ -560,8 +1265,34 @@ void appendAudioMetrics(JsonObject root) {
     audio["full_duplex"] = g_audio.supportsFullDuplex();
     audio["ready"] = g_audio.isReady();
     audio["dial_tone_active"] = g_audio.isDialToneActive();
+    audio["tone_route_active"] = g_audio.isToneRouteActive();
+    audio["tone_rendering"] = g_audio.isToneRenderingActive();
+    audio["tone_active"] = g_audio.isToneActive();
+    audio["tone_profile"] = toneProfileToString(g_audio.activeToneProfile());
+    audio["tone_event"] = toneEventToString(g_audio.activeToneEvent());
+    audio["tone_engine"] = g_audio.isToneRenderingActive() ? "CODE" : "NONE";
+    audio["playback_input_sample_rate"] = g_audio.playbackInputSampleRate();
+    audio["playback_input_bits_per_sample"] = g_audio.playbackInputBitsPerSample();
+    audio["playback_input_channels"] = g_audio.playbackInputChannels();
+    audio["playback_output_sample_rate"] = g_audio.playbackOutputSampleRate();
+    audio["playback_output_bits_per_sample"] = g_audio.playbackOutputBitsPerSample();
+    audio["playback_output_channels"] = g_audio.playbackOutputChannels();
+    audio["playback_resampler_active"] = g_audio.playbackResamplerActive();
+    audio["playback_channel_upmix_active"] = g_audio.playbackChannelUpmixActive();
+    audio["playback_loudness_gain_db"] = g_audio.playbackLoudnessGainDb();
+    audio["playback_limiter_active"] = g_audio.playbackLimiterActive();
+    audio["playback_rate_fallback"] = g_audio.playbackRateFallback();
+    audio["playback_sample_rate"] = g_audio.playbackSampleRate();
+    audio["playback_bits_per_sample"] = g_audio.playbackBitsPerSample();
+    audio["playback_channels"] = g_audio.playbackChannels();
+    audio["playback_format_overridden"] = g_audio.playbackFormatOverridden();
     audio["playing"] = g_audio.isPlaying();
     audio["sd_ready"] = g_audio.isSdReady();
+    audio["littlefs_ready"] = g_audio.isLittleFsReady();
+    audio["storage_default_policy"] = "SD_THEN_LITTLEFS";
+    const String last_storage_path = g_audio.lastStoragePath();
+    audio["storage_last_source"] = last_storage_path.isEmpty() ? "NONE" : mediaSourceToString(g_audio.lastStorageSource());
+    audio["storage_last_path"] = last_storage_path;
     audio["frames"] = metrics.frames_read;
     audio["underrun"] = metrics.underrun_count;
     audio["drop"] = metrics.drop_frames;
@@ -569,6 +1300,8 @@ void appendAudioMetrics(JsonObject root) {
     audio["adc_fft_peak_bin"] = metrics.adc_fft_peak_bin;
     audio["adc_fft_peak_freq_hz"] = metrics.adc_fft_peak_freq_hz;
     audio["adc_fft_peak_mag"] = metrics.adc_fft_peak_magnitude;
+    audio["tone_jitter_us_max"] = g_audio.toneJitterUsMax();
+    audio["tone_write_miss_count"] = g_audio.toneWriteMissCount();
 }
 
 void fillStatusSnapshot(JsonObject root) {
@@ -578,8 +1311,29 @@ void fillStatusSnapshot(JsonObject root) {
     JsonObject telephony = root["telephony"].to<JsonObject>();
     telephony["state"] = telephonyStateToString(g_telephony.state());
     telephony["hook"] = g_slic.isHookOff() ? "OFF_HOOK" : "ON_HOOK";
+    telephony["powered"] = g_telephony.isTelephonyPowered();
+    telephony["power_probe_active"] = g_telephony.isPowerProbeActive();
+    telephony["slic_power_down"] = g_slic.isPowerDownEnabled();
+    telephony["dial_buffer"] = g_telephony.dialBuffer();
+    telephony["dial_source"] = g_telephony.dialSource();
+    telephony["dial_match_state"] = dialMatchStateToString(g_telephony.dialMatchState());
+    telephony["hotline_active"] = g_hotline.active;
+    telephony["hotline_current_key"] = g_hotline.current_key;
+    telephony["hotline_queued_key"] = g_hotline.queued_key;
+    telephony["hotline_next_restart_ms"] = g_hotline.next_restart_ms;
     telephony["pending_espnow_call"] = g_pending_espnow_call;
-    telephony["pending_espnow_call_audio"] = g_pending_espnow_call_audio_path;
+    telephony["pending_espnow_call_kind"] = mediaRouteKindToString(g_pending_espnow_call_media.kind);
+    if (g_pending_espnow_call_media.kind == MediaRouteKind::TONE) {
+        telephony["pending_espnow_call_profile"] = toneProfileToString(g_pending_espnow_call_media.tone.profile);
+        telephony["pending_espnow_call_event"] = toneEventToString(g_pending_espnow_call_media.tone.event);
+        telephony["pending_espnow_call_audio"] = "";
+        telephony["pending_espnow_call_source"] = "AUTO";
+    } else {
+        telephony["pending_espnow_call_profile"] = "NONE";
+        telephony["pending_espnow_call_event"] = "NONE";
+        telephony["pending_espnow_call_audio"] = g_pending_espnow_call_media.path;
+        telephony["pending_espnow_call_source"] = mediaSourceToString(g_pending_espnow_call_media.source);
+    }
 
     appendAudioMetrics(root);
 
@@ -591,6 +1345,8 @@ void fillStatusSnapshot(JsonObject root) {
 
     JsonObject espnow = root["espnow"].to<JsonObject>();
     g_espnow.statusToJson(espnow);
+    espnow["hotline_notify_last_event"] = g_hotline.last_notify_event;
+    espnow["hotline_notify_last_ok"] = g_hotline.last_notify_ok;
 
     JsonObject hw = root["hw"].to<JsonObject>();
     hw["init_ok"] = g_hw_status.init_ok;
@@ -602,6 +1358,15 @@ void fillStatusSnapshot(JsonObject root) {
     A252ConfigStore::pinsToJson(g_pins_cfg, config["pins"].to<JsonObject>());
     A252ConfigStore::audioToJson(g_audio_cfg, config["audio"].to<JsonObject>());
     A252ConfigStore::espNowCallMapToJson(g_espnow_call_map, config["espnow_call_map"].to<JsonObject>());
+    A252ConfigStore::dialMediaMapToJson(g_dial_media_map, config["dial_media_map"].to<JsonObject>());
+    JsonObject migrations = root["config_migrations"].to<JsonObject>();
+    migrations["espnow_call_map_reset"] = g_config_migrations.espnow_call_map_reset;
+    migrations["dial_media_map_reset"] = g_config_migrations.dial_media_map_reset;
+
+    JsonObject firmware = root["firmware"].to<JsonObject>();
+    firmware["build_id"] = kFirmwareBuildId;
+    firmware["git_sha"] = kFirmwareGitSha;
+    firmware["contract_version"] = kFirmwareContractVersion;
 
     JsonArray peers = config["espnow_peers"].to<JsonArray>();
     A252ConfigStore::peersToJson(g_peer_store, peers);
@@ -774,11 +1539,136 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
         next.route = patch["route"].as<const char*>();
         next.route.toLowerCase();
     }
+    if (patch["clock_policy"].is<const char*>()) {
+        next.clock_policy = patch["clock_policy"].as<const char*>();
+        next.clock_policy.trim();
+        next.clock_policy.toUpperCase();
+    }
+    if (patch["wav_loudness_policy"].is<const char*>()) {
+        next.wav_loudness_policy = patch["wav_loudness_policy"].as<const char*>();
+        next.wav_loudness_policy.trim();
+        next.wav_loudness_policy.toUpperCase();
+    }
+    if (patch["wav_target_rms_dbfs"].is<int>()) {
+        next.wav_target_rms_dbfs = static_cast<int16_t>(patch["wav_target_rms_dbfs"].as<int>());
+    }
+    if (patch["wav_limiter_ceiling_dbfs"].is<int>()) {
+        next.wav_limiter_ceiling_dbfs = static_cast<int16_t>(patch["wav_limiter_ceiling_dbfs"].as<int>());
+    }
+    if (patch["wav_limiter_attack_ms"].is<int>()) {
+        const int attack = patch["wav_limiter_attack_ms"].as<int>();
+        if (attack >= 0 && attack <= static_cast<int>(UINT16_MAX)) {
+            next.wav_limiter_attack_ms = static_cast<uint16_t>(attack);
+        }
+    }
+    if (patch["wav_limiter_release_ms"].is<int>()) {
+        const int release = patch["wav_limiter_release_ms"].as<int>();
+        if (release >= 0 && release <= static_cast<int>(UINT16_MAX)) {
+            next.wav_limiter_release_ms = static_cast<uint16_t>(release);
+        }
+    }
+
+    if (g_profile == BoardProfile::ESP32_A252) {
+        next.clock_policy = "HYBRID_TELCO";
+        next.sample_rate = 8000U;
+        next.bits_per_sample = 16U;
+    }
 
     if (!A252ConfigStore::validateAudio(next, error)) {
         return false;
     }
     target = next;
+    return true;
+}
+
+bool parseStrictMediaRouteFromMapEntry(JsonVariantConst value, MediaRouteEntry& out_route, String& out_error) {
+    out_route = MediaRouteEntry{};
+    out_error = "";
+
+    if (value.is<const char*>()) {
+        out_route.kind = MediaRouteKind::FILE;
+        out_route.path = sanitizeMediaPath(value.as<const char*>());
+        out_route.source = MediaSource::AUTO;
+        out_route.playback.loop = false;
+        out_route.playback.pause_ms = 0U;
+        if (out_route.path.isEmpty()) {
+            out_error = "invalid_file_path";
+            return false;
+        }
+        if (isLegacyToneWavPath(out_route.path)) {
+            out_error = "tone_wav_deprecated_use_kind_tone";
+            return false;
+        }
+        return true;
+    }
+
+    if (!value.is<JsonObjectConst>()) {
+        out_error = "invalid_route";
+        return false;
+    }
+
+    JsonObjectConst obj = value.as<JsonObjectConst>();
+    MediaRouteKind kind = MediaRouteKind::FILE;
+    if (obj["kind"].is<const char*>()) {
+        if (!parseMediaRouteKind(obj["kind"].as<const char*>(), kind)) {
+            out_error = "invalid_kind";
+            return false;
+        }
+    } else if (obj["path"].is<const char*>()) {
+        kind = MediaRouteKind::FILE;
+    } else {
+        out_error = "missing_kind";
+        return false;
+    }
+
+    out_route.kind = kind;
+
+    if (kind == MediaRouteKind::TONE) {
+        if (!obj["profile"].is<const char*>() || !obj["event"].is<const char*>()) {
+            out_error = "tone_missing_profile_event";
+            return false;
+        }
+        if (!parseToneProfile(obj["profile"].as<const char*>(), out_route.tone.profile)) {
+            out_error = "invalid_tone_profile";
+            return false;
+        }
+        if (!parseToneEvent(obj["event"].as<const char*>(), out_route.tone.event)) {
+            out_error = "invalid_tone_event";
+            return false;
+        }
+        if (out_route.tone.profile == ToneProfile::NONE || out_route.tone.event == ToneEvent::NONE) {
+            out_error = "invalid_tone_route";
+            return false;
+        }
+        return true;
+    }
+
+    if (!obj["path"].is<const char*>()) {
+        out_error = "file_missing_path";
+        return false;
+    }
+    out_route.path = sanitizeMediaPath(obj["path"].as<const char*>());
+    if (out_route.path.isEmpty()) {
+        out_error = "invalid_file_path";
+        return false;
+    }
+    if (isLegacyToneWavPath(out_route.path)) {
+        out_error = "tone_wav_deprecated_use_kind_tone";
+        return false;
+    }
+    out_route.source = MediaSource::AUTO;
+    if (obj["source"].is<const char*>()) {
+        MediaSource parsed_source = MediaSource::AUTO;
+        if (!parseMediaSource(obj["source"].as<const char*>(), parsed_source)) {
+            out_error = "invalid_file_source";
+            return false;
+        }
+        out_route.source = parsed_source;
+    }
+    if (!parsePlaybackPolicyFromObject(obj, out_route.playback)) {
+        out_error = "invalid_playback_policy";
+        return false;
+    }
     return true;
 }
 
@@ -795,10 +1685,6 @@ DispatchResponse applyEspNowCallMapSet(const String& args) {
     JsonObject obj = doc.as<JsonObject>();
     EspNowCallMap next;
     for (JsonPair pair : obj) {
-        if (!pair.value().is<const char*>()) {
-            continue;
-        }
-
         String keyword = pair.key().c_str();
         keyword.trim();
         keyword.toUpperCase();
@@ -809,21 +1695,25 @@ DispatchResponse applyEspNowCallMapSet(const String& args) {
             continue;
         }
 
-        const String path = sanitizeAudioPath(pair.value().as<const char*>());
-        if (path.isEmpty()) {
-            continue;
+        MediaRouteEntry route;
+        String route_error;
+        if (!parseStrictMediaRouteFromMapEntry(pair.value().as<JsonVariantConst>(), route, route_error)) {
+            return makeResponse(false, "ESPNOW_CALL_MAP_SET " + route_error + " " + keyword);
         }
 
         bool updated = false;
         for (EspNowCallMapEntry& entry : next) {
             if (entry.keyword.equalsIgnoreCase(keyword)) {
-                entry.path = path;
+                entry.route = route;
                 updated = true;
                 break;
             }
         }
         if (!updated) {
-            next.push_back({keyword, path});
+            EspNowCallMapEntry created;
+            created.keyword = keyword;
+            created.route = route;
+            next.push_back(created);
         }
     }
 
@@ -837,6 +1727,75 @@ DispatchResponse applyEspNowCallMapSet(const String& args) {
     }
     g_espnow_call_map = next;
     return makeResponse(true, "ESPNOW_CALL_MAP_SET");
+}
+
+DispatchResponse applyDialMediaMapSet(const String& args) {
+    if (args.isEmpty()) {
+        return makeResponse(false, "DIAL_MEDIA_MAP_SET invalid_json");
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, args) != DeserializationError::Ok || !doc.is<JsonObject>()) {
+        return makeResponse(false, "DIAL_MEDIA_MAP_SET invalid_json");
+    }
+
+    DialMediaMap next;
+    JsonObject obj = doc.as<JsonObject>();
+    for (JsonPair pair : obj) {
+        String number = pair.key().c_str();
+        number.trim();
+        if (number.isEmpty()) {
+            continue;
+        }
+        if (!isDialMapNumberKey(number)) {
+            return makeResponse(false, "DIAL_MEDIA_MAP_SET invalid_number " + number);
+        }
+
+        MediaRouteEntry route;
+        String route_error;
+        if (!parseStrictMediaRouteFromMapEntry(pair.value().as<JsonVariantConst>(), route, route_error)) {
+            return makeResponse(false, "DIAL_MEDIA_MAP_SET " + route_error + " " + number);
+        }
+        DialMediaMapEntry created;
+        created.number = number;
+        created.route = route;
+        next.push_back(created);
+    }
+
+    if (next.empty()) {
+        return makeResponse(false, "DIAL_MEDIA_MAP_SET no_valid_entries");
+    }
+
+    String save_error;
+    if (!A252ConfigStore::saveDialMediaMap(next, &save_error)) {
+        return makeResponse(false, "DIAL_MEDIA_MAP_SET save_failed" + (save_error.isEmpty() ? "" : String(" ") + save_error));
+    }
+    g_dial_media_map = next;
+    return makeResponse(true, "DIAL_MEDIA_MAP_SET");
+}
+
+bool espNowCallMapHasLegacyToneWav(const EspNowCallMap& map) {
+    for (const EspNowCallMapEntry& entry : map) {
+        if (entry.route.kind != MediaRouteKind::FILE) {
+            continue;
+        }
+        if (isLegacyToneWavPath(entry.route.path)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool dialMediaMapHasLegacyToneWav(const DialMediaMap& map) {
+    for (const DialMediaMapEntry& entry : map) {
+        if (entry.route.kind != MediaRouteKind::FILE) {
+            continue;
+        }
+        if (isLegacyToneWavPath(entry.route.path)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 DispatchResponse executeCommandLine(const String& line) {
@@ -945,6 +1904,28 @@ void registerCommands() {
         return makeResponse(true, "UNLOCK");
     });
 
+    g_dispatcher.registerCommand("SLIC_PD_ON", [](const String&) {
+        if (g_telephony.state() != TelephonyState::IDLE) {
+            return makeResponse(false, "SLIC_PD_ON telephony_active");
+        }
+        g_telephony.forceTelephonyPower(false);
+        return makeResponse(true, "SLIC_PD_ON");
+    });
+
+    g_dispatcher.registerCommand("SLIC_PD_OFF", [](const String&) {
+        g_telephony.forceTelephonyPower(true);
+        return makeResponse(true, "SLIC_PD_OFF");
+    });
+
+    g_dispatcher.registerCommand("SLIC_PD_STATUS", [](const String&) {
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        root["power_down"] = g_slic.isPowerDownEnabled();
+        root["telephony_powered"] = g_telephony.isTelephonyPowered();
+        root["power_probe_active"] = g_telephony.isPowerProbeActive();
+        return jsonResponse(doc);
+    });
+
     g_dispatcher.registerCommand("NEXT", [](const String&) {
         if (g_active_scene_id.isEmpty()) {
             return makeResponse(false, "scene_not_found");
@@ -1033,8 +2014,152 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("PLAY", [](const String& args) {
-        const String path = args.isEmpty() ? "/welcome.wav" : args;
-        return makeResponse(g_audio.playFile(path.c_str()), "PLAY");
+        if (args.isEmpty()) {
+            return makeResponse(false, "PLAY missing_args");
+        }
+        MediaRouteEntry route;
+        if (!parseMediaRouteFromArgs(args, route, false) || route.kind != MediaRouteKind::FILE) {
+            return makeResponse(false, "PLAY invalid_args");
+        }
+        if (isLegacyToneWavPath(route.path)) {
+            return makeResponse(false, "PLAY tone_wav_deprecated_use_TONE_PLAY");
+        }
+        return makeResponse(playMediaRoute(route), "PLAY");
+    });
+
+    g_dispatcher.registerCommand("FFAT_RESET", [](const String& args) {
+        const String path = sanitizeFsPath(args);
+        if (path.isEmpty()) {
+            return makeResponse(false, "FFAT_RESET invalid_path");
+        }
+        if (!ensureFfatMounted()) {
+            return makeResponse(false, "FFAT_RESET mount_failed");
+        }
+        if (!ensureParentDirsOnFfat(path)) {
+            return makeResponse(false, "FFAT_RESET mkdir_failed");
+        }
+        File f = FFat.open(path, FILE_WRITE);
+        if (!f) {
+            return makeResponse(false, "FFAT_RESET open_failed");
+        }
+        f.close();
+        return makeResponse(true, "FFAT_RESET");
+    });
+
+    g_dispatcher.registerCommand("FFAT_APPEND_B64", [](const String& args) {
+        String path;
+        String b64;
+        if (!splitFirstToken(args, path, b64) || path.isEmpty() || b64.isEmpty()) {
+            return makeResponse(false, "FFAT_APPEND_B64 invalid_args");
+        }
+        path = sanitizeFsPath(path);
+        if (path.isEmpty()) {
+            return makeResponse(false, "FFAT_APPEND_B64 invalid_path");
+        }
+        if (!ensureFfatMounted()) {
+            return makeResponse(false, "FFAT_APPEND_B64 mount_failed");
+        }
+        std::vector<uint8_t> decoded;
+        if (!decodeBase64ToBytes(b64, decoded)) {
+            return makeResponse(false, "FFAT_APPEND_B64 decode_failed");
+        }
+        if (!ensureParentDirsOnFfat(path)) {
+            return makeResponse(false, "FFAT_APPEND_B64 mkdir_failed");
+        }
+        File f = FFat.open(path, FILE_APPEND);
+        if (!f) {
+            return makeResponse(false, "FFAT_APPEND_B64 open_failed");
+        }
+        const size_t written = f.write(decoded.data(), decoded.size());
+        f.close();
+        if (written != decoded.size()) {
+            return makeResponse(false, "FFAT_APPEND_B64 write_failed");
+        }
+        return makeResponse(true, "FFAT_APPEND_B64");
+    });
+
+    g_dispatcher.registerCommand("FFAT_EXISTS", [](const String& args) {
+        const String path = sanitizeFsPath(args);
+        if (path.isEmpty()) {
+            return makeResponse(false, "FFAT_EXISTS invalid_path");
+        }
+        if (!ensureFfatMounted()) {
+            return makeResponse(false, "FFAT_EXISTS mount_failed");
+        }
+        return makeResponse(FFat.exists(path), "FFAT_EXISTS");
+    });
+
+    g_dispatcher.registerCommand("TONE_PLAY", [](const String& args) {
+        if (!g_audio.isReady()) {
+            return makeResponse(false, "TONE_PLAY audio_not_ready");
+        }
+        g_telephony.clearDialToneSuppression();
+        String first;
+        String rest;
+        if (!splitFirstToken(args, first, rest) || first.isEmpty()) {
+            return makeResponse(false, "TONE_PLAY invalid_args");
+        }
+        ToneProfile profile = ToneProfile::FR_FR;
+        ToneEvent event = ToneEvent::NONE;
+        if (rest.isEmpty()) {
+            if (!parseToneEvent(first, event)) {
+                return makeResponse(false, "TONE_PLAY invalid_event");
+            }
+        } else {
+            String event_text;
+            String trailing;
+            if (!splitFirstToken(rest, event_text, trailing) || event_text.isEmpty() || !trailing.isEmpty()) {
+                return makeResponse(false, "TONE_PLAY invalid_args");
+            }
+            if (!parseToneProfile(first, profile)) {
+                return makeResponse(false, "TONE_PLAY invalid_profile");
+            }
+            if (!parseToneEvent(event_text, event)) {
+                return makeResponse(false, "TONE_PLAY invalid_event");
+            }
+        }
+        if (profile == ToneProfile::NONE || event == ToneEvent::NONE) {
+            return makeResponse(false, "TONE_PLAY invalid_route");
+        }
+        const bool ok = g_audio.playTone(profile, event);
+        return makeResponse(ok, ok ? "TONE_PLAY" : "TONE_PLAY failed");
+    });
+
+    g_dispatcher.registerCommand("TONE_STOP", [](const String&) {
+        g_audio.stopTone();
+        return makeResponse(true, "TONE_STOP");
+    });
+
+    g_dispatcher.registerCommand("VOLUME_SET", [](const String& args) {
+        String value_token;
+        String trailing;
+        if (!splitFirstToken(args, value_token, trailing) || value_token.isEmpty() || !trailing.isEmpty()) {
+            return makeResponse(false, "VOLUME_SET invalid_args");
+        }
+
+        char* end = nullptr;
+        const long value = strtol(value_token.c_str(), &end, 10);
+        if (end == nullptr || end == value_token.c_str() || *end != '\0' || value < 0 || value > 100) {
+            return makeResponse(false, "VOLUME_SET invalid_value");
+        }
+
+        A252AudioConfig next = g_audio_cfg;
+        next.volume = static_cast<uint8_t>(value);
+
+        if (!persistA252AudioConfigIfNeeded(next, "VOLUME_SET")) {
+            return makeResponse(false, "VOLUME_SET persist_failed");
+        }
+
+        if (g_profile == BoardProfile::ESP32_A252) {
+            g_codec.setVolume(g_audio_cfg.volume);
+        }
+        return makeResponse(true, "VOLUME_SET");
+    });
+
+    g_dispatcher.registerCommand("VOLUME_GET", [](const String&) {
+        JsonDocument doc;
+        doc["volume"] = g_audio_cfg.volume;
+        return jsonResponse(doc);
     });
 
     g_dispatcher.registerCommand("RESET_METRICS", [](const String&) {
@@ -1046,23 +2171,24 @@ void registerCommands() {
         if (!g_audio.isReady()) {
             return makeResponse(false, "TONE_ON audio_not_ready");
         }
-        const bool ok = g_audio.startDialTone();
+        g_telephony.clearDialToneSuppression();
+        const bool ok = g_audio.playTone(ToneProfile::FR_FR, ToneEvent::DIAL);
         return makeResponse(ok, ok ? "TONE_ON" : "TONE_ON failed");
     });
 
     g_dispatcher.registerCommand("TONE_OFF", [](const String&) {
-        g_audio.stopDialTone();
+        g_telephony.suppressDialToneForMs(kToneOffSuppressionMs);
+        g_audio.stopTone();
         return makeResponse(true, "TONE_OFF");
     });
 
     g_dispatcher.registerCommand("AMP_ON", [](const String&) {
-        // Locked polarity for A252 bench: AMP_EN active LOW on GPIO21.
-        digitalWrite(kAudioAmpEnablePin, LOW);
+        setAmpEnabled(true);
         return makeResponse(true, "AMP_ON");
     });
 
     g_dispatcher.registerCommand("AMP_OFF", [](const String&) {
-        digitalWrite(kAudioAmpEnablePin, HIGH);
+        setAmpEnabled(false);
         return makeResponse(true, "AMP_OFF");
     });
 
@@ -1141,6 +2267,85 @@ void registerCommands() {
         return makeResponse(true, "ESPNOW_CALL_MAP_RESET");
     });
 
+    g_dispatcher.registerCommand("DIAL_MEDIA_MAP_GET", [](const String&) {
+        JsonDocument doc;
+        JsonObject map = doc.to<JsonObject>();
+        A252ConfigStore::dialMediaMapToJson(g_dial_media_map, map);
+        return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("DIAL_MEDIA_MAP_SET", [](const String& args) {
+        return applyDialMediaMapSet(args);
+    });
+
+    g_dispatcher.registerCommand("DIAL_MEDIA_MAP_RESET", [](const String&) {
+        initDefaultDialMediaMap(g_dial_media_map);
+        if (!A252ConfigStore::saveDialMediaMap(g_dial_media_map)) {
+            return makeResponse(false, "DIAL_MEDIA_MAP_RESET save_failed");
+        }
+        return makeResponse(true, "DIAL_MEDIA_MAP_RESET");
+    });
+
+    g_dispatcher.registerCommand("HOTLINE_STATUS", [](const String&) {
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        root["active"] = g_hotline.active;
+        root["current_key"] = g_hotline.current_key;
+        root["current_digits"] = g_hotline.current_digits;
+        root["current_source"] = g_hotline.current_source;
+        root["queued"] = g_hotline.queued;
+        root["queued_key"] = g_hotline.queued_key;
+        root["queued_digits"] = g_hotline.queued_digits;
+        root["queued_source"] = g_hotline.queued_source;
+        root["pending_restart"] = g_hotline.pending_restart;
+        root["next_restart_ms"] = g_hotline.next_restart_ms;
+        root["last_notify_event"] = g_hotline.last_notify_event;
+        root["last_notify_ok"] = g_hotline.last_notify_ok;
+        JsonObject route = root["current_route"].to<JsonObject>();
+        route["kind"] = mediaRouteKindToString(g_hotline.current_route.kind);
+        if (g_hotline.current_route.kind == MediaRouteKind::TONE) {
+            route["profile"] = toneProfileToString(g_hotline.current_route.tone.profile);
+            route["event"] = toneEventToString(g_hotline.current_route.tone.event);
+        } else {
+            route["path"] = g_hotline.current_route.path;
+            route["source"] = mediaSourceToString(g_hotline.current_route.source);
+            JsonObject playback = route["playback"].to<JsonObject>();
+            playback["loop"] = g_hotline.current_route.playback.loop;
+            playback["pause_ms"] = g_hotline.current_route.playback.pause_ms;
+        }
+        return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("HOTLINE_TRIGGER", [](const String& args) {
+        String digits;
+        String rest;
+        if (!splitFirstToken(args, digits, rest) || digits.isEmpty()) {
+            return makeResponse(false, "HOTLINE_TRIGGER invalid_args");
+        }
+
+        bool from_pulse = false;
+        if (!rest.isEmpty()) {
+            String source;
+            String trailing;
+            if (!splitFirstToken(rest, source, trailing) || !trailing.isEmpty()) {
+                return makeResponse(false, "HOTLINE_TRIGGER invalid_args");
+            }
+            source.trim();
+            source.toLowerCase();
+            if (source == "pulse") {
+                from_pulse = true;
+            } else if (source == "dtmf") {
+                from_pulse = false;
+            } else {
+                return makeResponse(false, "HOTLINE_TRIGGER invalid_source");
+            }
+        }
+
+        String state;
+        const bool ok = triggerHotlineRouteForDigits(digits, from_pulse, &state);
+        return makeResponse(ok, ok ? String("HOTLINE_TRIGGER ") + state : String("HOTLINE_TRIGGER ") + state);
+    });
+
     g_dispatcher.registerCommand("SLIC_CONFIG_GET", [](const String&) {
         JsonDocument doc;
         A252ConfigStore::pinsToJson(g_pins_cfg, doc.to<JsonObject>());
@@ -1200,11 +2405,10 @@ void registerCommands() {
         if (!applyAudioPatch(doc.as<JsonVariantConst>(), next, error)) {
             return makeResponse(false, "AUDIO_CONFIG_SET " + error);
         }
-        if (!A252ConfigStore::saveAudio(next, &error)) {
-            return makeResponse(false, "AUDIO_CONFIG_SET " + error);
+        if (!persistA252AudioConfigIfNeeded(next, "AUDIO_CONFIG_SET")) {
+            return makeResponse(false, "AUDIO_CONFIG_SET persist_failed");
         }
 
-        g_audio_cfg = next;
         if (g_profile == BoardProfile::ESP32_A252) {
             g_codec.setVolume(g_audio_cfg.volume);
             g_codec.setMute(g_audio_cfg.mute);
@@ -1214,6 +2418,80 @@ void registerCommands() {
         g_hw_status.audio_ready = audio_ok;
         g_hw_status.init_ok = g_hw_status.slic_ready && g_hw_status.codec_ready && g_hw_status.audio_ready;
         return makeResponse(audio_ok, "AUDIO_CONFIG_SET");
+    });
+
+    g_dispatcher.registerCommand("AUDIO_POLICY_GET", [](const String&) {
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        root["clock_policy"] = g_audio_cfg.clock_policy;
+        root["wav_loudness_policy"] = g_audio_cfg.wav_loudness_policy;
+        root["wav_target_rms_dbfs"] = g_audio_cfg.wav_target_rms_dbfs;
+        root["wav_limiter_ceiling_dbfs"] = g_audio_cfg.wav_limiter_ceiling_dbfs;
+        root["wav_limiter_attack_ms"] = g_audio_cfg.wav_limiter_attack_ms;
+        root["wav_limiter_release_ms"] = g_audio_cfg.wav_limiter_release_ms;
+        return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("AUDIO_POLICY_SET", [](const String& args) {
+        if (args.isEmpty()) {
+            return makeResponse(false, "AUDIO_POLICY_SET invalid_json");
+        }
+
+        JsonDocument doc;
+        if (deserializeJson(doc, args) != DeserializationError::Ok) {
+            return makeResponse(false, "AUDIO_POLICY_SET invalid_json");
+        }
+
+        A252AudioConfig next = g_audio_cfg;
+        String error;
+        if (!applyAudioPatch(doc.as<JsonVariantConst>(), next, error)) {
+            return makeResponse(false, "AUDIO_POLICY_SET " + error);
+        }
+        if (!persistA252AudioConfigIfNeeded(next, "AUDIO_POLICY_SET")) {
+            return makeResponse(false, "AUDIO_POLICY_SET persist_failed");
+        }
+
+        if (g_profile == BoardProfile::ESP32_A252) {
+            g_codec.setVolume(g_audio_cfg.volume);
+            g_codec.setMute(g_audio_cfg.mute);
+            g_codec.setRoute(g_audio_cfg.route);
+        }
+        const bool audio_ok = g_audio.begin(buildI2sConfig(g_pins_cfg, g_audio_cfg));
+        g_hw_status.audio_ready = audio_ok;
+        g_hw_status.init_ok = g_hw_status.slic_ready && g_hw_status.codec_ready && g_hw_status.audio_ready;
+        return makeResponse(audio_ok, "AUDIO_POLICY_SET");
+    });
+
+    g_dispatcher.registerCommand("AUDIO_PROBE", [](const String& args) {
+        MediaRouteEntry route;
+        if (!parseMediaRouteFromArgs(args, route, false) || route.kind != MediaRouteKind::FILE || route.path.isEmpty()) {
+            return makeResponse(false, "AUDIO_PROBE invalid_args");
+        }
+
+        AudioPlaybackProbeResult probe;
+        const bool ok = g_audio.probePlaybackFileFromSource(route.path.c_str(), route.source, probe);
+        if (!ok) {
+            return makeResponse(false, "AUDIO_PROBE " + (probe.error.isEmpty() ? String("failed") : probe.error));
+        }
+
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        root["ok"] = probe.ok;
+        root["path"] = probe.path;
+        root["source"] = mediaSourceToString(probe.source);
+        root["input_sample_rate"] = probe.input_sample_rate;
+        root["input_bits_per_sample"] = probe.input_bits_per_sample;
+        root["input_channels"] = probe.input_channels;
+        root["output_sample_rate"] = probe.output_sample_rate;
+        root["output_bits_per_sample"] = probe.output_bits_per_sample;
+        root["output_channels"] = probe.output_channels;
+        root["resampler_active"] = probe.resampler_active;
+        root["channel_upmix_active"] = probe.channel_upmix_active;
+        root["loudness_auto"] = probe.loudness_auto;
+        root["loudness_gain_db"] = probe.loudness_gain_db;
+        root["limiter_active"] = probe.limiter_active;
+        root["rate_fallback"] = probe.rate_fallback;
+        return jsonResponse(doc);
     });
 }
 
@@ -1426,15 +2704,39 @@ void setup() {
     A252ConfigStore::loadPins(g_pins_cfg);
     g_pins_cfg.slic_line = -1;
     A252ConfigStore::loadAudio(g_audio_cfg);
+    ensureA252AudioDefaults();
     A252ConfigStore::loadEspNowPeers(g_peer_store);
+    g_config_migrations = ConfigMigrationStatus{};
     initDefaultEspNowCallMap(g_espnow_call_map);
     if (!A252ConfigStore::loadEspNowCallMap(g_espnow_call_map)) {
         initDefaultEspNowCallMap(g_espnow_call_map);
         A252ConfigStore::saveEspNowCallMap(g_espnow_call_map);
     }
+    if (espNowCallMapHasLegacyToneWav(g_espnow_call_map)) {
+        Serial.println("[RTC_BL_PHONE] migration: resetting espnow_call_map legacy tone wav routes");
+        initDefaultEspNowCallMap(g_espnow_call_map);
+        A252ConfigStore::saveEspNowCallMap(g_espnow_call_map);
+        g_config_migrations.espnow_call_map_reset = true;
+    }
+    initDefaultDialMediaMap(g_dial_media_map);
+    if (!A252ConfigStore::loadDialMediaMap(g_dial_media_map)) {
+        initDefaultDialMediaMap(g_dial_media_map);
+        A252ConfigStore::saveDialMediaMap(g_dial_media_map);
+    }
+    if (dialMediaMapHasLegacyToneWav(g_dial_media_map)) {
+        Serial.println("[RTC_BL_PHONE] migration: resetting dial_media_map legacy tone wav routes");
+        initDefaultDialMediaMap(g_dial_media_map);
+        A252ConfigStore::saveDialMediaMap(g_dial_media_map);
+        g_config_migrations.dial_media_map_reset = true;
+    }
+    if (g_dial_media_map.empty()) {
+        Serial.println("[RTC_BL_PHONE] dial_media_map empty -> seeding hotline defaults 1/2/3");
+        initDefaultDialMediaMap(g_dial_media_map);
+        A252ConfigStore::saveDialMediaMap(g_dial_media_map);
+    }
 
     pinMode(kAudioAmpEnablePin, OUTPUT);
-    digitalWrite(kAudioAmpEnablePin, LOW);
+    setAmpEnabled(true);
 
     const bool hw_init_ok = applyHardwareConfig();
     if (!hw_init_ok) {
@@ -1460,6 +2762,7 @@ void setup() {
 void loop() {
     g_wifi.loop();
     g_telephony.tick();
+    tickHotlineRuntime();
     g_scope_display.tick();
     g_web_server.handle();
     g_espnow.tick();

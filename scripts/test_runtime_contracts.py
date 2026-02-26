@@ -120,12 +120,6 @@ class RuntimeContractTests(unittest.TestCase):
         src = read_main()
         self.assertRegex(src, r"\bg_wifi\.loop\(\);")
 
-    def test_mqtt_publish_route_maps_to_registered_command(self) -> None:
-        web = read_webserver()
-        self.assertIn('handleDispatch(request, "MQTT_PUBLISH "', web)
-        main = read_main()
-        self.assertIn('registerCommand("MQTT_PUBLISH",', main)
-
     def test_auth_is_disabled_for_dispatch_paths_by_default(self) -> None:
         main = read_main()
         self.assertIn("kWebAuthEnabledByDefault", main)

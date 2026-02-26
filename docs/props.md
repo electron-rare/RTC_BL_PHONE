@@ -2,7 +2,7 @@
 
 ## MQTT (ArduinoProps)
 - Contrôle via topics : `rtc_bl_phone/<device_id>/in` (commandes), `rtc_bl_phone/<device_id>/out` (événements).
-- Payload JSON : `{ "cmd": "CALL" }`, `{ "cmd": "PLAY", "path": "/welcome.wav" }`, etc.
+- Payload JSON : `{ "cmd": "CALL" }`, `{ "cmd": "PLAY", "path": "/assets/wav/ETSI_EU/dial.wav" }`, etc.
 - Statut publié identique à la sortie série.
 
 ## ESP-NOW

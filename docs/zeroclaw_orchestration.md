@@ -122,6 +122,13 @@ Sorties:
 - `docs/hw_validation_a252_report.md`
 - `docs/a252_strict_gate_summary.md`
 
+Checks média A252 inclus dans `hw_validation`:
+
+- `serial_media_routing` (bloquant) valide:
+  - `DIAL_MEDIA_MAP_SET/GET`
+  - `ESPNOW_CALL_MAP_SET/GET` (format enrichi compatible legacy)
+  - champs `STATUS.audio.storage_*` (`storage_default_policy`, `storage_last_source`, `storage_last_path`)
+
 ## 6) Preuve boucle complète (2026-02-21)
 
 Etat courant:

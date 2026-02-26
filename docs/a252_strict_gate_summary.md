@@ -1,6 +1,6 @@
 # A252 Strict Gate Summary
 
-- Date UTC: 2026-02-25T13:33:04.090306+00:00
+- Date UTC: 2026-02-25T15:17:05.494914+00:00
 - Verdict global: PASS
 - Port A252: `/dev/cu.usbserial-0001`
 - ZeroClaw: `http://127.0.0.1:8788`
@@ -20,6 +20,7 @@
 |---|---|
 | serial_smoke | PASS |
 | serial_hook_ring_audio | PASS |
+| serial_media_routing | PASS |
 | serial_network_stack | PASS |
 | http_endpoints | PASS |
 | manual_hook_transition | MANUAL_SKIP |

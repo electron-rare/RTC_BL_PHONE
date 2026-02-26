@@ -1,0 +1,899 @@
+{
+  "schema_version": "1.2",
+  "variants": [
+    {
+      "name": "clean_44k1",
+      "sample_rate_hz": 44100,
+      "style": "clean",
+      "path_prefix": "assets/wav_clean_44k1"
+    },
+    {
+      "name": "clean_8k",
+      "sample_rate_hz": 8000,
+      "style": "clean",
+      "path_prefix": "assets/wav_clean_8k"
+    }
+  ],
+  "notes": [
+    "v3 WAVs are audition-friendly (longer repeating patterns) while keeping exact cadences.",
+    "Looping: loop samples [loop.start_sample, loop.end_sample).",
+    "Cadenced tones with repeat=forever: loop covers the whole file (integer number of cadence cycles).",
+    "then_continuous tones: loop starts at appended steady segment."
+  ],
+  "profiles": {
+    "ETSI_EU": {
+      "events": {
+        "dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "secondary_dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/secondary_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/secondary_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "special_dial_stutter": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/special_dial_stutter.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 485100
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/special_dial_stutter.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 88000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 11.0
+        },
+        "recall_dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/recall_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/recall_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "ringback": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/ringback.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/ringback.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "busy": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/busy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/busy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "congestion": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/congestion.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/congestion.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "call_waiting": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/call_waiting.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 476280
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/call_waiting.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 86400
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.8
+        },
+        "confirmation": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/confirmation.wav",
+              "loop": {
+                "enabled": false,
+                "start_sample": null,
+                "end_sample": null
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/confirmation.wav",
+              "loop": {
+                "enabled": false,
+                "start_sample": null,
+                "end_sample": null
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 1.5
+        },
+        "sit_intercept": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/ETSI_EU/sit_intercept.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 90405
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/ETSI_EU/sit_intercept.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 16400
+              }
+            }
+          },
+          "kind": "SIT",
+          "duration_s": 2.05
+        }
+      }
+    },
+    "FR_FR": {
+      "events": {
+        "dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "secondary_dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/secondary_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/secondary_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "special_dial_stutter": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/special_dial_stutter.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 460845
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/special_dial_stutter.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 83600
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.45
+        },
+        "recall_dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/recall_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/recall_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "ringback": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/ringback.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/ringback.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "busy": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/busy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/busy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "congestion": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/congestion.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/congestion.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "call_waiting": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/call_waiting.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 454230
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/call_waiting.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 82400
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.3
+        },
+        "sit_intercept": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/FR_FR/sit_intercept.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 86436
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/FR_FR/sit_intercept.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 15680
+              }
+            }
+          },
+          "kind": "SIT",
+          "duration_s": 1.96
+        }
+      }
+    },
+    "UK_GB": {
+      "events": {
+        "dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "secondary_dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/secondary_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/secondary_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "special_dial_stutter": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/special_dial_stutter.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 8820,
+                "end_sample": 449820
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/special_dial_stutter.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 1600,
+                "end_sample": 81600
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.2
+        },
+        "recall_dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/recall_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/recall_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "ringback": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/ringback.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 529200
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/ringback.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 96000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 12.0
+        },
+        "busy": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/busy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 14586516
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/busy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 84000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.5
+        },
+        "congestion": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/congestion.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 29171709
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/congestion.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 84000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.5
+        },
+        "call_waiting": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/call_waiting.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 529200
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/call_waiting.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 96000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 12.0
+        },
+        "sit_intercept": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/sit_intercept.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 90405
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/sit_intercept.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 16400
+              }
+            }
+          },
+          "kind": "SIT",
+          "duration_s": 2.05
+        },
+        "dial__mains_hum_legacy": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/UK_GB/dial__mains_hum_legacy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/UK_GB/dial__mains_hum_legacy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        }
+      }
+    },
+    "NA_US": {
+      "events": {
+        "dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "secondary_dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/secondary_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/secondary_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "recall_dial": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/recall_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 26460,
+                "end_sample": 467460
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/recall_dial.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 4800,
+                "end_sample": 84800
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.6
+        },
+        "special_dial_mwi_stutter": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/special_dial_mwi_stutter.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 8820,
+                "end_sample": 449820
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/special_dial_mwi_stutter.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 1600,
+                "end_sample": 81600
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.2
+        },
+        "ringback": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/ringback.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 529200
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/ringback.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 96000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 12.0
+        },
+        "busy": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/busy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/busy.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "reorder": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/reorder.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/reorder.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "confirmation": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/confirmation.wav",
+              "loop": {
+                "enabled": false,
+                "start_sample": null,
+                "end_sample": null
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/confirmation.wav",
+              "loop": {
+                "enabled": false,
+                "start_sample": null,
+                "end_sample": null
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 0.6
+        },
+        "call_waiting": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/call_waiting.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 441000
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/call_waiting.wav",
+              "loop": {
+                "enabled": true,
+                "start_sample": 0,
+                "end_sample": 80000
+              }
+            }
+          },
+          "kind": "tone",
+          "duration_s": 10.0
+        },
+        "sit_intercept": {
+          "variants": {
+            "clean_44k1": {
+              "wav": "assets/wav_clean_44k1/NA_US/sit_intercept.wav",
+              "loop": {
+                "enabled": false,
+                "start_sample": null,
+                "end_sample": null
+              }
+            },
+            "clean_8k": {
+              "wav": "assets/wav_clean_8k/NA_US/sit_intercept.wav",
+              "loop": {
+                "enabled": false,
+                "start_sample": null,
+                "end_sample": null
+              }
+            }
+          },
+          "kind": "SIT",
+          "duration_s": 0.99
+        }
+      }
+    }
+  }
+}

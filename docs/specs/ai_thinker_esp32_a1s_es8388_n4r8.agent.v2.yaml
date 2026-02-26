@@ -1,0 +1,651 @@
+governance:
+  version: "2.0.0"
+  owner: "RTC_BL_PHONE/A252"
+  last_reviewed: "2026-02-25"
+  applies_to_branch: "esp32_RTC_ZACUS"
+
+# ai_thinker_esp32_a1s_es8388_n4r8.agent.yaml
+# Board spec for an "agent" (code/config generator)
+# Target: Ai-Thinker ESP32-A1S Audio Kit + ES8388 codec
+# Memory: N4R8 => 4MB Flash + 8MB PSRAM
+# DIP (user provided): 1 OFF, 2 ON, 3 ON, 4 OFF, 5 OFF
+
+spec_version: 2
+
+board:
+  id: ai_thinker_esp32_a1s_es8388_n4r8
+  name: "Ai-Thinker ESP32-A1S (ES8388) N4R8"
+  vendor: "Ai-Thinker"
+  mcu: "ESP32 (Xtensa LX6)"
+  notes:
+    - "Spec matches the common ESP32 Audio Kit v2.2 + ESP32-A1S (ES8388) pinout."
+    - "Some boards sold as 'ESP32-A1S Audio Kit' exist in multiple wiring variants; see audio.board_variants."
+
+memory:
+  flash:
+    type: spi_nor
+    size_mb: 4
+  psram:
+    type: spi_psram
+    size_mb: 8
+    mapped_mb_default: 4
+    himem_api_required_for_mb_over_4: true
+
+dip_switches:
+  description: "5-position DIP on Audio Kit: routes GPIO13/GPIO15 to SD/KEY2/JTAG nets."
+  state:
+    dip1_key2_gpio13: off
+    dip2_sd_data3_cs_gpio13: on
+    dip3_sd_cmd_mosi_gpio15: on
+    dip4_jtag_mtck_gpio13: off
+    dip5_jtag_mtdo_gpio15: off
+
+peripherals:
+  i2c:
+    - id: i2c0
+      port: 0
+      sda_gpio: 33
+      scl_gpio: 32
+      bus_speed_hz_default: 100000
+      bus_speed_hz_max_device: 400000
+      devices:
+        - name: es8388
+          address_7bit: "0x10"
+          alt_address_7bit_if_ad0_high: "0x11"
+          role: "audio_codec_control"
+          register_model: "8-bit register address + 8-bit register value"
+  i2s:
+    - id: i2s0
+      port: 0
+      codec: es8388
+      pins:
+        mclk_gpio: 0
+        bclk_gpio: 27
+        lrck_gpio: 25
+        dout_gpio: 26   # ESP32 -> codec (playback, DIN on codec)
+        din_gpio: 35    # codec -> ESP32 (record, DOUT on codec), input-only
+      capabilities:
+        playback: true
+        record: true
+        full_duplex: true
+
+  audio_paths:
+    speaker_amp:
+      enable_gpio: 21
+      enable_active_level: high
+      default_state_on_boot: off
+      notes:
+        - "GPIO21 is wired to the external speaker amp shutdown control (active-high enable)."
+        - "Recommended: keep amp disabled during codec init to avoid pops."
+    headphone_detect:
+      gpio: 39
+      active_level: low
+      input_only: true
+      internal_pullups_supported: false
+      notes:
+        - "Use as a digital input; low typically means 'headphones inserted'."
+
+  storage:
+    sdcard:
+      mode: spi
+      enabled: true
+      spi_pins:
+        cs_gpio: 13
+        sck_gpio: 14
+        mosi_gpio: 15
+        miso_gpio: 2
+      requires_dip:
+        dip2_sd_data3_cs_gpio13: on
+        dip3_sd_cmd_mosi_gpio15: on
+      notes:
+        - "GPIO13 is SD CS (via DIP2 ON)."
+        - "GPIO15 is SD MOSI (via DIP3 ON)."
+        - "GPIO13 is shared with KEY2 and JTAG MTCK depending on DIP state."
+
+  buttons:
+    # Key2 shares GPIO13 with SD CS. With DIP2 ON and DIP1 OFF, treat KEY2 as unavailable.
+    key1: { gpio: 36, input_only: true, available: true }
+    key2: { gpio: 13, available: false, reason: "DIP1 OFF and GPIO13 is used as SD CS (DIP2 ON)." }
+    key3: { gpio: 19, available: true }
+    key4: { gpio: 23, available: true }
+    key5: { gpio: 18, available: true }
+    key6: { gpio: 5,  available: true }
+
+gpio_constraints:
+  - "GPIO34-39 are input-only (no output)."
+  - "GPIO34-39: no internal pull-ups/pull-downs; rely on external resistors."
+  - "GPIO0 is a strapping pin and (commonly) used as I2S MCLK on this board; avoid external pull-downs to keep normal boot."
+  - "GPIO2 and GPIO15 are strapping pins; avoid external loads that could change boot strapping levels."
+  - "GPIO13 is shared (SD CS / KEY2 / JTAG MTCK via DIP). Your DIP config dedicates it to SD CS."
+
+recommended_defaults:
+  audio:
+    sample_rate_hz: 44100
+    bits_per_sample: 16
+    channels: 2
+    i2s_comm_format: "I2S_MSB"
+    use_apll: true
+    mclk_multiple: 256     # MCLK = Fs * 256 (common for ES8388)
+    initial_volume_percent: 60
+  sdcard:
+    spi_clock_hz: 20000000
+  psram:
+    prefer_psram_allocations: true
+
+framework_presets:
+  arduino:
+    board_profile: "ESP32 Wrover Module (recommended for PSRAM builds)"
+    options:
+      psram: enabled
+      flash_size_mb: 4
+      cpu_freq_mhz: 240
+  esp_idf:
+    menuconfig_hints:
+      - "Component config -> ESP32-specific -> Support for external, SPI-connected RAM (SPIRAM)"
+      - "If allocating >4MB PSRAM, use esp_himem API (bank switching)."
+      - "Partition table must fit 4MB flash."
+
+audio:
+  overview:
+    purpose: "Detailed ES8388 control (I2C) + audio data plane (I2S) + GPIO integration."
+    chain_summary:
+      playback: "ESP32 I2S0 TX -> ES8388 DAC -> output mixer -> headphone out + speaker amp (GPIO21 enable)."
+      record: "Mic/Line-in -> ES8388 ADC -> ESP32 I2S0 RX."
+
+  board_variants:
+    # Some ESP32-A1S / Audio-Kit boards exist with different I2C pins.
+    # Keep these as fallbacks if ES8388 is not seen on the default bus.
+    common_variant:
+      i2c_sda: 33
+      i2c_scl: 32
+      i2s_mclk: 0
+      i2s_bclk: 27
+      i2s_lrck: 25
+      i2s_dout: 26
+      i2s_din: 35
+    alt_variant_i2c_23_18:
+      i2c_sda: 23
+      i2c_scl: 18
+      note: "Seen on some A1S ES8388 boards. Try only if default I2C pins fail."
+
+  buses:
+    i2c_control:
+      peripheral_id: i2c0
+      role: "ES8388 register control"
+      address_7bit: "0x10"
+      alt_address_7bit_if_ad0_high: "0x11"
+      max_speed_hz: 400000
+      recommended_speed_hz: 100000
+      register_model: "8-bit register address, 8-bit register data"
+      transactions:
+        write:
+          format: "START, (ADDR<<1)|0, REG, DATA, STOP"
+        read:
+          format: "START, (ADDR<<1)|0, REG, RESTART, (ADDR<<1)|1, DATA, NACK, STOP"
+      notes:
+        - "ES8388 uses a 7-bit chip address 001000x (x=AD0)."
+
+    i2s_audio:
+      peripheral_id: i2s0
+      role: "Audio PCM stream"
+      roles:
+        esp32: "master"
+        es8388: "slave"
+      pins:
+        mclk_gpio: 0
+        bclk_gpio: 27
+        lrck_gpio: 25
+        dout_gpio: 26
+        din_gpio: 35
+      clocking:
+        mclk_multiple: 256
+        typical_mclk_hz:
+          fs_44k1: 11289600
+          fs_48k: 12288000
+      notes:
+        - "GPIO0 provides the codec clock (MCLK) on this board; avoid pressing BOOT during playback/record."
+
+  gpio:
+    speaker_amp_shutdown:
+      gpio: 21
+      active_level: high
+      recommended_init_state: low
+    headphone_detect:
+      gpio: 39
+      active_level: low
+      has_external_pullup: true
+    sd_detect:
+      gpio: 34
+      active_level: low
+      notes:
+        - "Optional: only if you wire SD_CD; board provides SD_Detect net."
+
+  es8388:
+    identity:
+      name: "Everest Semi ES8388"
+      control_if: "2-wire (I2C) or SPI; on ESP32-A1S it is controlled over I2C."
+      total_registers: 53
+      reg_addr_range: ["0x00", "0x34"]
+
+    register_reference:
+      # Minimal, code-focused register map. Addresses are hex.
+      # Fields are listed only where needed for init / runtime control.
+      - addr: "0x00"
+        name: "CHIPCONTROL1"
+        bits:
+          SCPReset: { bit: 7, desc: "1 resets control port registers to default" }
+          SameFs:   { bit: 4, desc: "1 uses a shared Fs clocking domain when ADC/DAC same rate" }
+          SeqEn:    { bit: 3, desc: "sequence enable" }
+          EnRef:    { bit: 2, desc: "enable reference" }
+          VMIDSEL:  { bits: "1:0", desc: "VMID selection" }
+
+      - addr: "0x01"
+        name: "CHIPCONTROL2"
+        note: "Analog power / bias control (used in startup sequences)."
+
+      - addr: "0x02"
+        name: "CHIPPOWER"
+        note: "Digital/analog power-down bits incl. ADC/DAC digital power, DLL power, Vref power."
+
+      - addr: "0x03"
+        name: "ADCPOWER"
+        note: "Analog input / ADC / mic-bias power control."
+
+      - addr: "0x04"
+        name: "DACPOWER"
+        note: "DAC + output drivers power control (LOUT/ROUT enable)."
+
+      - addr: "0x08"
+        name: "MASTER_MODE_CONTROL"
+        bits:
+          MSC:      { bit: 7, desc: "1 master, 0 slave" }
+          MCLKDIV2: { bit: 6, desc: "divide MCLK by 2 in master mode" }
+          BCLK_INV: { bit: 5, desc: "invert BCLK in master mode" }
+          BCLKDIV:  { bits: "4:0", desc: "BCLK divider in master mode" }
+
+      - addr: "0x09"
+        name: "MICAMP"
+        fields:
+          MicAmpL: { bits: "7:4", desc: "left mic/PGA gain, 0..24dB in 3dB steps" }
+          MicAmpR: { bits: "3:0", desc: "right mic/PGA gain, 0..24dB in 3dB steps" }
+
+      - addr: "0x0A"
+        name: "ADC_INPUT_SELECT"
+        fields:
+          LINSEL: { bits: "7:6", desc: "00 LIN1, 01 LIN2, 11 differential (DS)" }
+          RINSEL: { bits: "5:4", desc: "00 RIN1, 01 RIN2, 11 differential (DS)" }
+
+      - addr: "0x0C"
+        name: "ADC_IFACE"
+        fields:
+          DATSEL:    { bits: "7:6", desc: "channel data mapping" }
+          ADCLRP:    { bit: 5, desc: "LRCK polarity / DSP offset" }
+          ADCWL:     { bits: "4:2", desc: "word length: 24/20/18/16/32" }
+          ADCFORMAT: { bits: "1:0", desc: "format: I2S/LeftJust/RightJust/DSP" }
+
+      - addr: "0x0D"
+        name: "ADC_FS_RATIO"
+        fields:
+          ADCFsMode:  { bit: 5, desc: "0 single speed, 1 double speed" }
+          ADCFsRatio: { bits: "4:0", desc: "MCLK/LRCK ratio code (e.g. 0x02=256)" }
+
+      - addr: "0x0F"
+        name: "ADC_RAMP_MUTE"
+        fields:
+          ADCRampRate: { bits: "7:6", desc: "volume ramp rate" }
+          ADCSoftRamp: { bit: 5, desc: "soft ramp enable" }
+          ADCLeR:      { bit: 3, desc: "link L/R digital gain controls" }
+          ADCMute:     { bit: 2, desc: "mute ADC digital output" }
+
+      - addr: "0x10"
+        name: "LADCVOL"
+        range: "0dB..-96dB in 0.5dB steps (0x00..0xC0)"
+      - addr: "0x11"
+        name: "RADCVOL"
+        range: "0dB..-96dB in 0.5dB steps (0x00..0xC0)"
+
+      - addr: "0x17"
+        name: "DAC_IFACE"
+        fields:
+          DACLRSWAP: { bit: 7, desc: "swap DAC L/R" }
+          DACLRP:    { bit: 6, desc: "LRCK polarity / DSP offset" }
+          DACWL:     { bits: "5:3", desc: "word length: 24/20/18/16/32" }
+          DACFORMAT: { bits: "2:1", desc: "format: I2S/LeftJust/RightJust/DSP" }
+          # bit0 is used in DSP/PCM mode; keep 0 for I2S.
+
+      - addr: "0x18"
+        name: "DAC_FS_RATIO"
+        fields:
+          DACFsMode:  { bit: 5, desc: "0 single speed, 1 double speed" }
+          DACFsRatio: { bits: "4:0", desc: "MCLK/LRCK ratio code (e.g. 0x02=256)" }
+
+      - addr: "0x19"
+        name: "DAC_RAMP_MUTE"
+        fields:
+          DACRampRate: { bits: "7:6", desc: "volume ramp rate" }
+          DACSoftRamp: { bit: 5, desc: "soft ramp enable" }
+          DACLeR:      { bit: 3, desc: "link L/R digital gain controls" }
+          DACMute:     { bit: 2, desc: "mute DAC digital output" }
+
+      - addr: "0x1A"
+        name: "LDACVOL"
+        range: "0dB..-96dB in 0.5dB steps (0x00..0xC0)"
+      - addr: "0x1B"
+        name: "RDACVOL"
+        range: "0dB..-96dB in 0.5dB steps (0x00..0xC0)"
+
+      - addr: "0x1D"
+        name: "DAC_ZERO_MONO_SE_VPP"
+        fields:
+          ZeroL:     { bit: 7, desc: "set left DAC output all zero" }
+          ZeroR:     { bit: 6, desc: "set right DAC output all zero" }
+          Mono:      { bit: 5, desc: "mono mix (L+R)/2" }
+          SE:        { bits: "4:2", desc: "stereo enhancement strength" }
+          Vpp_scale: { bits: "1:0", desc: "analog output Vpp scale" }
+
+      - addr: "0x26"
+        name: "MIXER_SELECT"
+        fields:
+          LMIXSEL: { bits: "5:3", desc: "Left mixer input select (LIN1/LIN2/ADC)" }
+          RMIXSEL: { bits: "2:0", desc: "Right mixer input select (RIN1/RIN2/ADC)" }
+
+      - addr: "0x27"
+        name: "MIXER_LEFT"
+        fields:
+          LD2LO:     { bit: 7, desc: "Left DAC -> Left mixer enable" }
+          LI2LO:     { bit: 6, desc: "LIN -> Left mixer enable" }
+          LI2LOVOL:  { bits: "5:3", desc: "LIN->Left mixer gain (+6..-15dB)" }
+
+      - addr: "0x2A"
+        name: "MIXER_RIGHT"
+        fields:
+          RD2RO:     { bit: 7, desc: "Right DAC -> Right mixer enable" }
+          RI2RO:     { bit: 6, desc: "RIN -> Right mixer enable" }
+          RI2ROVOL:  { bits: "5:3", desc: "RIN->Right mixer gain (+6..-15dB)" }
+
+      - addr: "0x2B"
+        name: "LRCK_LINK_AND_DLL"
+        fields:
+          slrck:      { bit: 7, desc: "1 = ADC/DAC share LRCK, 0 separate" }
+          lrck_sel:   { bit: 6, desc: "master-mode selection when slrck=1" }
+          mclk_dis:   { bit: 4, desc: "disable MCLK input from PAD" }
+          adc_dll_pwd:{ bit: 3, desc: "ADC DLL power down" }
+          dac_dll_pwd:{ bit: 2, desc: "DAC DLL power down" }
+
+      - addr: "0x2E"
+        name: "LOUT1VOL"
+        range: "-45dB..+4.5dB in 1.5dB steps (0x00..0x21); 0x1E==0dB"
+      - addr: "0x2F"
+        name: "ROUT1VOL"
+        range: "-45dB..+4.5dB in 1.5dB steps (0x00..0x21); 0x1E==0dB"
+      - addr: "0x30"
+        name: "LOUT2VOL"
+        range: "-45dB..+4.5dB in 1.5dB steps (0x00..0x21); 0x1E==0dB"
+      - addr: "0x31"
+        name: "ROUT2VOL"
+        range: "-45dB..+4.5dB in 1.5dB steps (0x00..0x21); 0x1E==0dB"
+
+    i2s_format_presets:
+      # Precomputed convenience values for ADC_IFACE (0x0C) and DAC_IFACE (0x17).
+      # These assume standard I2S format (ADCFORMAT/DACFORMAT = I2S) and normal LRCK polarity.
+      i2s_24bit:
+        adc_iface_0x0C: "0x00"
+        dac_iface_0x17: "0x00"
+      i2s_16bit:
+        adc_iface_0x0C: "0x0C"   # ADCWL=011 (16-bit) << 2
+        dac_iface_0x17: "0x18"   # DACWL=011 (16-bit) << 3
+      i2s_32bit:
+        adc_iface_0x0C: "0x10"   # ADCWL=100 (32-bit) << 2
+        dac_iface_0x17: "0x20"   # DACWL=100 (32-bit) << 3
+
+    mixer_presets:
+      dac_to_outputs:
+        description: "Route DAC (I2S playback) to output mixers."
+        writes:
+          "0x26": "0x00"
+          "0x27": "0xB8"
+          "0x28": "0x38"
+          "0x29": "0x38"
+          "0x2A": "0xB8"
+      bypass_linein_to_outputs:
+        description: "Analog bypass: route Line-In to outputs (no DAC)."
+        writes:
+          "0x26": "0x00"
+          "0x27": "0x50"
+          "0x28": "0x38"
+          "0x29": "0x38"
+          "0x2A": "0x50"
+
+    init_sequences:
+      # Based on ES8388 User Guide sequences, with small practical additions (mute/amp control notes).
+      - id: "es8388_start_full_duplex_slave"
+        description: "Power-up codec for play+record, I2S slave (ESP32 is I2S master)."
+        preconditions:
+          - "I2C bus initialized."
+          - "I2S clocks (MCLK/BCLK/LRCK) should be present before enabling playback/record in some designs."
+          - "Keep speaker amp disabled (GPIO21 low) during init."
+        steps:
+          - { reg: "0x00", val: "0x80", comment: "Optional: reset control port registers to default (SCPReset=1). Then reconfigure." }
+          - { reg: "0x08", val: "0x00", comment: "Slave mode (MSC=0)." }
+          - { reg: "0x02", val: "0xF3", comment: "Power down DEM/STM while configuring." }
+          - { reg: "0x00", val: "0x05", comment: "Enable reference/sequence (User Guide 'Play&Record mode' step)." }
+          - { reg: "0x01", val: "0x40", comment: "Power up analog and bias." }
+          - { reg: "0x03", val: "0x00", comment: "Power up ADC / analog input / mic-bias." }
+          - { reg: "0x04", val: "0x3C", comment: "Power up DAC and enable output drivers." }
+          - { reg: "0x2B", val: "0x80", comment: "Set same LRCK for ADC/DAC (slrck=1)." }
+
+          # Analog input selection + mic gain (adjust per your hardware/mic wiring)
+          - { reg: "0x0A", val: "0x00", comment: "Select ADC input: LIN1/RIN1." }
+          - { reg: "0x09", val: "0x88", comment: "Mic/PGA gain: +24dB left and right (example)." }
+
+          # I2S interface word length/format (override per bits_per_sample)
+          - { reg: "0x0C", val: "0x0C", comment: "ADC_IFACE: I2S, 16-bit (override if needed)." }
+          - { reg: "0x17", val: "0x18", comment: "DAC_IFACE: I2S, 16-bit (override if needed)." }
+
+          # MCLK/LRCK ratio (common values: 256 for 44.1k/48k with 11.2896/12.288MHz MCLK)
+          - { reg: "0x0D", val: "0x02", comment: "ADC MCLK/LRCK ratio = 256." }
+          - { reg: "0x18", val: "0x02", comment: "DAC MCLK/LRCK ratio = 256." }
+
+          # Digital volumes (0x00=0dB, 0xC0=-96dB). Start low if you want pop-free ramp.
+          - { reg: "0x10", val: "0x00", comment: "ADC digital volume L (0dB)." }
+          - { reg: "0x11", val: "0x00", comment: "ADC digital volume R (0dB)." }
+          - { reg: "0x1A", val: "0x00", comment: "DAC digital volume L (0dB)." }
+          - { reg: "0x1B", val: "0x00", comment: "DAC digital volume R (0dB)." }
+
+          # Output driver volumes (0x1E=0dB). Keep <=0dB to avoid clipping on some loads.
+          - { reg: "0x2E", val: "0x1E", comment: "LOUT1 volume = 0dB." }
+          - { reg: "0x2F", val: "0x1E", comment: "ROUT1 volume = 0dB." }
+          - { reg: "0x30", val: "0x1E", comment: "LOUT2 volume = 0dB." }
+          - { reg: "0x31", val: "0x1E", comment: "ROUT2 volume = 0dB." }
+
+          # Mixer routing: DAC to outputs (for playback). Replace with bypass preset for line-in bypass.
+          - { reg: "0x26", val: "0x00", comment: "Mixer select default." }
+          - { reg: "0x27", val: "0xB8", comment: "Enable LDAC->LOUT mixer path." }
+          - { reg: "0x28", val: "0x38", comment: "Reserved/board default per User Guide." }
+          - { reg: "0x29", val: "0x38", comment: "Reserved/board default per User Guide." }
+          - { reg: "0x2A", val: "0xB8", comment: "Enable RDAC->ROUT mixer path." }
+
+          # Unmute (optional; you can keep muted until I2S is running and your buffers are primed)
+          - { reg: "0x0F", val: "0x30", comment: "ADC unmute (example from User Guide)." }
+          - { reg: "0x19", val: "0x32", comment: "DAC unmute (example from User Guide)." }
+
+          - { reg: "0x02", val: "0x00", comment: "Power up DEM/STM after configuration." }
+        postconditions:
+          - "Codec is configured for full-duplex I2S slave."
+          - "You can now enable speaker amp (GPIO21 high) if headphones are not inserted."
+
+      - id: "es8388_set_bypass_linein"
+        description: "Configure analog bypass: line-in to outputs (no DAC path)."
+        steps:
+          - { reg: "0x04", val: "0xFC", comment: "Power down DAC, power up analog output for bypass (per User Guide)." }
+          - { reg: "0x02", val: "0xF0", comment: "Power up DEM/STM or reference voltage (per User Guide)." }
+          - { reg: "0x26", val: "0x00", comment: "LMIXSEL/RMIXSEL select LIN1/RIN1." }
+          - { reg: "0x27", val: "0x50", comment: "LIN -> LOUT enable (bypass)." }
+          - { reg: "0x28", val: "0x38", comment: "Reserved/board default per User Guide." }
+          - { reg: "0x29", val: "0x38", comment: "Reserved/board default per User Guide." }
+          - { reg: "0x2A", val: "0x50", comment: "RIN -> ROUT enable (bypass)." }
+          - { reg: "0x2B", val: "0x80", comment: "Set same LRCK." }
+
+    runtime_controls:
+      volume:
+        dac_digital:
+          regs: ["0x1A", "0x1B"]
+          encoding:
+            unit: "dB attenuation"
+            step_db: 0.5
+            max_db: 0
+            min_db: -96
+            note: "0x00=0dB, 0xC0=-96dB"
+          helpers:
+            volume_percent_to_reg_linear:
+              description: "Map 0..100% to 0xC0..0x00 linearly (simple UX mapping)."
+              formula: "reg = clamp(round((100 - vol_percent) * 192 / 100), 0, 192)"
+        adc_digital:
+          regs: ["0x10", "0x11"]
+          encoding:
+            unit: "dB attenuation"
+            step_db: 0.5
+            max_db: 0
+            min_db: -96
+            note: "0x00=0dB, 0xC0=-96dB"
+        output_driver:
+          regs: ["0x2E", "0x2F", "0x30", "0x31"]
+          encoding:
+            unit: "dB gain"
+            step_db: 1.5
+            min_db: -45
+            max_db: 4.5
+            note: "0x00=-45dB, 0x1E=0dB, 0x21=+4.5dB"
+          helpers:
+            db_to_reg:
+              formula: "reg = clamp(round((db + 45) / 1.5), 0, 33)"
+            reg_to_db:
+              formula: "db = -45 + 1.5*reg"
+
+      mute:
+        adc:
+          reg: "0x0F"
+          bit: 2
+          examples:
+            mute:   "0x34"
+            unmute: "0x30"
+        dac:
+          reg: "0x19"
+          bit: 2
+          examples:
+            mute:   "0x36"
+            unmute: "0x32"
+        zero_output:
+          reg: "0x1D"
+          bits: { left: 7, right: 6 }
+          note: "For hard mute: set ZeroL/ZeroR=1 (equivalent to -96dB)."
+
+      input_select:
+        reg: "0x0A"
+        presets:
+          lin1_rin1: "0x00"
+          lin2_rin2: "0x50"
+        note: "Also consider LMIXSEL/RMIXSEL (0x26) if using bypass/mixer paths."
+
+      mic_gain:
+        reg: "0x09"
+        left_bits: "7:4"
+        right_bits: "3:0"
+        mapping_db: { "0x0": 0, "0x1": 3, "0x2": 6, "0x3": 9, "0x4": 12, "0x5": 15, "0x6": 18, "0x7": 21, "0x8": 24 }
+
+  pop_noise_mitigation:
+    recommended_sequence:
+      - "Keep speaker amp disabled (GPIO21 low)."
+      - "Configure codec with DAC muted and/or digital volume at -96dB."
+      - "Start I2S, prime DMA buffers with zeros."
+      - "Unmute DAC and ramp volume gradually (digital volume or output driver volume)."
+      - "Enable speaker amp (GPIO21 high) after codec stable."
+    note: "Exact pop behavior depends on your amp and loads; adapt."
+
+code_templates:
+  # These are intentionally minimal and meant as scaffolding for the agent.
+  esp_idf_legacy_i2c:
+    c: |-
+      // I2C0 init (ESP-IDF legacy driver)
+      // Pins: SDA=GPIO33, SCL=GPIO32, 100kHz (safe default)
+      i2c_config_t conf = {
+          .mode = I2C_MODE_MASTER,
+          .sda_io_num = 33,
+          .scl_io_num = 32,
+          .sda_pullup_en = GPIO_PULLUP_ENABLE,
+          .scl_pullup_en = GPIO_PULLUP_ENABLE,
+          .master.clk_speed = 100000,
+      };
+      ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
+      ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, conf.mode, 0, 0, 0));
+
+  esp_idf_legacy_es8388_i2c_helpers:
+    c: |-
+      // ES8388: 8-bit register address + 8-bit value over I2C
+      static esp_err_t es8388_write_reg(uint8_t reg, uint8_t val) {
+          const uint8_t addr_7b = 0x10;
+          i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+          i2c_master_start(cmd);
+          i2c_master_write_byte(cmd, (addr_7b << 1) | I2C_MASTER_WRITE, true);
+          i2c_master_write_byte(cmd, reg, true);
+          i2c_master_write_byte(cmd, val, true);
+          i2c_master_stop(cmd);
+          esp_err_t ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, pdMS_TO_TICKS(100));
+          i2c_cmd_link_delete(cmd);
+          return ret;
+      }
+
+      static esp_err_t es8388_read_reg(uint8_t reg, uint8_t *out_val) {
+          const uint8_t addr_7b = 0x10;
+          // Write register address
+          i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+          i2c_master_start(cmd);
+          i2c_master_write_byte(cmd, (addr_7b << 1) | I2C_MASTER_WRITE, true);
+          i2c_master_write_byte(cmd, reg, true);
+          i2c_master_stop(cmd);
+          esp_err_t ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, pdMS_TO_TICKS(100));
+          i2c_cmd_link_delete(cmd);
+          if (ret != ESP_OK) return ret;
+
+          // Re-start and read byte
+          cmd = i2c_cmd_link_create();
+          i2c_master_start(cmd);
+          i2c_master_write_byte(cmd, (addr_7b << 1) | I2C_MASTER_READ, true);
+          i2c_master_read_byte(cmd, out_val, I2C_MASTER_NACK);
+          i2c_master_stop(cmd);
+          ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, pdMS_TO_TICKS(100));
+          i2c_cmd_link_delete(cmd);
+          return ret;
+      }
+
+  esp_idf_legacy_i2s_pins_hint:
+    c: |-
+      // I2S0 pins (common Audio Kit v2.2 wiring):
+      // MCLK=GPIO0, BCLK=GPIO27, LRCK/WS=GPIO25, DOUT=GPIO26, DIN=GPIO35 (input-only)
+
+  arduino_notes:
+    text:
+      - "Use an ESP32 core that supports PSRAM (WROVER profile) for N4R8."
+      - "Many Arduino ES8388 examples rely on ESP-ADF-style register sequences; reuse init_steps from audio.es8388.init_sequences."
+
+validation_tests:
+  - id: i2c_scan
+    description: "Scan I2C bus to confirm ES8388 presence."
+    method: "scan"
+    expect_devices: ["0x10"]
+  - id: es8388_reg_readback
+    description: "Read back a known register after write (e.g., write 0x19 then read it)."
+    method: "i2c_read_write"
+    expect: "match"
+  - id: i2s_clock_sanity
+    description: "Confirm MCLK/BCLK/LRCK toggling (logic analyzer) once I2S started; verify GPIO0 outputs MCLK."
+    method: "signal_probe"
+    expect: "clocks_present"
+  - id: audio_playback
+    description: "Keep PA disabled, init codec, then enable PA and play sine/wav; confirm audible output."
+    method: "i2s_tx"
+    expect: "audible_output"
+  - id: headphone_detect
+    description: "Insert/remove headphone; GPIO39 should toggle (active-low). Disable PA when headphones inserted."
+    method: "gpio_read"
+    expect: "toggle"

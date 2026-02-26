@@ -431,3 +431,7 @@ coverage/
 # If data/audio was previously committed, run:
 #   git rm --cached -r data/audio
 data/audio/
+docs/specs/tone_plan_wav_assets/assets
+docs/wav_clean_8k/
+docs/wav_ptt_vintage_8k/
+

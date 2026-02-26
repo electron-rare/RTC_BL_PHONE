@@ -5,3 +5,4 @@ Ce document est un alias conservé pour compatibilité IDE/outils.
 Référence active:
 
 - [docs/branch_quality_gate.md](./branch_quality_gate.md)
+- [docs/a252_board_spec.md](./a252_board_spec.md)

@@ -27,8 +27,9 @@ def resolve_bin(requested: str) -> str:
 
 def default_ports() -> list[str]:
     patterns = [
-        "/dev/tty.SLAB_USBtoUART",
+        "/dev/cu.usbserial*",
         "/dev/tty.usbserial-*",
+        "/dev/tty.SLAB_USBtoUART",
         "/dev/tty.usbmodem*",
     ]
     ports: list[str] = []

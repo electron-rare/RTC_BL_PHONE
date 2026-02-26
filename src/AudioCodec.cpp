@@ -1,6 +1,7 @@
 #include "AudioCodec.h"
 #include <driver/i2s.h>
 #include <Wire.h>
+#include "config/a1s_board_pins.h"
 
 // Documentation technique :
 // ES8388 : Codec I2S + I2C, contrôle volume/mute/routage via registres.
@@ -8,12 +9,6 @@
 // Routage audio : géré par setRoute, peut impliquer multiplexeur/relais.
 // Extensibilité : ajouter un nouveau codec = nouvelle classe dérivée.
 // Testabilité : mock des méthodes, logs sur chaque action.
-#define I2S_BCK_PIN  26
-#define I2S_WS_PIN   25
-#define I2S_DOUT_PIN 22
-#define I2S_DIN_PIN  23
-#define ES8388_I2C_ADDR 0x10
-
 // --- ES8388Codec ---
 bool ES8388Codec::init() {
     i2s_config_t i2s_config = {
@@ -30,26 +25,26 @@ bool ES8388Codec::init() {
         .fixed_mclk = 0
     };
     i2s_pin_config_t pin_config = {
-        .bck_io_num = I2S_BCK_PIN,
-        .ws_io_num = I2S_WS_PIN,
-        .data_out_num = I2S_DOUT_PIN,
-        .data_in_num = I2S_DIN_PIN
+        .bck_io_num = A1S_I2S_BCLK,
+        .ws_io_num = A1S_I2S_LRCK,
+        .data_out_num = A1S_I2S_DOUT,
+        .data_in_num = A1S_I2S_DIN
     };
     esp_err_t err = i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
     if (err != ESP_OK) return false;
     err = i2s_set_pin(I2S_NUM_0, &pin_config);
     if (err != ESP_OK) return false;
-    Wire.begin();
+    Wire.begin(A1S_I2C_SDA, A1S_I2C_SCL);
     setVolume(80);
     return true;
 }
 
 bool ES8388Codec::setVolume(uint8_t volume) {
-    Wire.beginTransmission(ES8388_I2C_ADDR);
+    Wire.beginTransmission(A1S_ES8388_I2C_ADDR);
     Wire.write(0x2B);
     Wire.write(volume);
     Wire.endTransmission();
-    Wire.beginTransmission(ES8388_I2C_ADDR);
+    Wire.beginTransmission(A1S_ES8388_I2C_ADDR);
     Wire.write(0x2C);
     Wire.write(volume);
     Wire.endTransmission();
@@ -57,7 +52,7 @@ bool ES8388Codec::setVolume(uint8_t volume) {
 }
 
 bool ES8388Codec::mute(bool state) {
-    Wire.beginTransmission(ES8388_I2C_ADDR);
+    Wire.beginTransmission(A1S_ES8388_I2C_ADDR);
     Wire.write(0x2F);
     Wire.write(state ? 0x01 : 0x00);
     Wire.endTransmission();
@@ -65,7 +60,7 @@ bool ES8388Codec::mute(bool state) {
 }
 
 bool ES8388Codec::setRoute(AudioRoute route) {
-    Wire.beginTransmission(ES8388_I2C_ADDR);
+    Wire.beginTransmission(A1S_ES8388_I2C_ADDR);
     Wire.write(0x30);
     Wire.write(route == ROUTE_BLUETOOTH ? 0x01 : 0x00);
     Wire.endTransmission();
@@ -87,10 +82,10 @@ bool PCM5102Codec::init() {
         .fixed_mclk = 0
     };
     i2s_pin_config_t pin_config = {
-        .bck_io_num = I2S_BCK_PIN,
-        .ws_io_num = I2S_WS_PIN,
-        .data_out_num = I2S_DOUT_PIN,
-        .data_in_num = I2S_DIN_PIN
+        .bck_io_num = A1S_I2S_BCLK,
+        .ws_io_num = A1S_I2S_LRCK,
+        .data_out_num = A1S_I2S_DOUT,
+        .data_in_num = A1S_I2S_DIN
     };
     esp_err_t err = i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
     if (err != ESP_OK) return false;
