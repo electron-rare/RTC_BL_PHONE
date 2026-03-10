@@ -33,6 +33,9 @@ struct A252PinsConfig {
     int pcm_fmt = -1;
 };
 
+// Intentional aliases for board-centric naming in S3-focused firmware branches.
+using S3PinsConfig = A252PinsConfig;
+
 struct A252AudioConfig {
     uint32_t sample_rate = 8000;
     uint8_t bits_per_sample = 16;
@@ -46,12 +49,15 @@ struct A252AudioConfig {
     bool mute = false;
     String route = "rtc";
     String clock_policy = "HYBRID_TELCO";
-    String wav_loudness_policy = "AUTO_NORMALIZE_LIMITER";
+    String wav_loudness_policy = "FIXED_GAIN_ONLY";
     int16_t wav_target_rms_dbfs = -18;
     int16_t wav_limiter_ceiling_dbfs = -2;
     uint16_t wav_limiter_attack_ms = 8;
     uint16_t wav_limiter_release_ms = 120;
 };
+
+// Intentional aliases for board-centric naming in S3-focused firmware branches.
+using S3AudioConfig = A252AudioConfig;
 
 struct EspNowCallMapEntry {
     String keyword;
@@ -69,18 +75,30 @@ using DialMediaMap = std::vector<DialMediaMapEntry>;
 
 struct EspNowPeerStore {
     std::vector<String> peers;
+    String device_name = "HOTLINE_PHONE";
 };
 
 class A252ConfigStore {
 public:
+    // Legacy board-agnostic interface.
     static A252PinsConfig defaultPins();
     static A252AudioConfig defaultAudio();
+
+    // S3/board-clarity façade.
+    static S3PinsConfig defaultS3Pins();
+    static S3AudioConfig defaultS3Audio();
 
     static bool loadPins(A252PinsConfig& out);
     static bool savePins(const A252PinsConfig& cfg, String* error = nullptr);
 
+    static bool loadS3Pins(S3PinsConfig& out);
+    static bool saveS3Pins(const S3PinsConfig& cfg, String* error = nullptr);
+
     static bool loadAudio(A252AudioConfig& out);
     static bool saveAudio(const A252AudioConfig& cfg, String* error = nullptr);
+
+    static bool loadS3Audio(S3AudioConfig& out);
+    static bool saveS3Audio(const S3AudioConfig& cfg, String* error = nullptr);
 
     static bool loadEspNowPeers(EspNowPeerStore& out);
     static bool saveEspNowPeers(const EspNowPeerStore& store, String* error = nullptr);
@@ -99,6 +117,7 @@ public:
     static void dialMediaMapToJson(const DialMediaMap& map, JsonObject obj);
 
     static String normalizeMac(const String& value);
+    static String normalizeDeviceName(const String& value);
     static bool parseMac(const String& value, uint8_t out[6]);
 };
 

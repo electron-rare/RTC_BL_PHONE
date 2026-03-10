@@ -72,6 +72,8 @@ struct AudioPlaybackProbeResult {
     float loudness_gain_db = 0.0f;
     bool limiter_active = false;
     uint32_t rate_fallback = 0;
+    uint32_t data_size_bytes = 0;
+    uint32_t duration_ms = 0;
 };
 
 AudioConfig defaultAudioConfigForProfile(BoardProfile profile);
@@ -116,9 +118,15 @@ public:
     virtual uint8_t playbackOutputChannels() const;
     virtual bool playbackResamplerActive() const;
     virtual bool playbackChannelUpmixActive() const;
+    virtual bool playbackLoudnessAuto() const;
     virtual float playbackLoudnessGainDb() const;
     virtual bool playbackLimiterActive() const;
     virtual uint32_t playbackRateFallback() const;
+    virtual uint32_t playbackCopySourceBytes() const;
+    virtual uint32_t playbackCopyAcceptedBytes() const;
+    virtual uint32_t playbackCopyLossBytes() const;
+    virtual uint32_t playbackCopyLossEvents() const;
+    virtual String playbackLastError() const;
     virtual uint16_t playbackSampleRate() const;
     virtual uint8_t playbackBitsPerSample() const;
     virtual uint8_t playbackChannels() const;
@@ -140,6 +148,17 @@ public:
     const AudioConfig& config() const;
 
 private:
+    class BlockingOutput : public Print {
+    public:
+        void setOutput(Print* out);
+        size_t write(uint8_t b) override;
+        size_t write(const uint8_t* data, size_t len) override;
+        int availableForWrite() override;
+
+    private:
+        Print* out_ = nullptr;
+    };
+
     static size_t activeChannelCount(i2s_channel_fmt_t channel_format);
     static void audioTaskFn(void* arg);
     size_t captureFromAdc(int16_t* dst, size_t samples, bool blocking);
@@ -178,12 +197,12 @@ private:
         uint32_t data_offset,
         uint32_t data_size,
         bool& out_limiter_active) const;
-    void applyWavLoudnessGainDb(float gain_db);
     bool decodePcmSample(const uint8_t* bytes, uint8_t bits_per_sample, int32_t& out) const;
     void updateToneJitter(uint32_t now_ms);
     void restorePlaybackAudioInfo();
     bool streamPlaybackChunk();
     bool advanceToneStep();
+    bool configureWavPlaybackPipeline(const audio_tools::AudioInfo& input, const audio_tools::AudioInfo& output);
     bool loadTonePattern(ToneProfile profile, ToneEvent event);
     int16_t sampleToneWave(float& phase, uint16_t freq_hz) const;
     void updateAdcDspConfig(const AudioConfig& cfg);
@@ -231,6 +250,12 @@ private:
     float playback_loudness_gain_db_ = 0.0f;
     bool playback_limiter_active_ = false;
     uint32_t playback_rate_fallback_ = 0;
+    uint32_t playback_copy_source_bytes_ = 0U;
+    uint32_t playback_copy_accepted_bytes_ = 0U;
+    uint32_t playback_copy_loss_bytes_ = 0U;
+    uint32_t playback_copy_loss_events_ = 0U;
+    String playback_last_error_;
+    uint32_t playback_next_chunk_ms_ = 0U;
     AudioConfig _config;
     FeatureMatrix features_;
     AudioRuntimeMetrics metrics_;
@@ -272,9 +297,12 @@ private:
     bool adc_dsp_fft_probe_enabled_ = false;
     bool adc_dsp_fft_probe_backend_ready_ = false;
     audio_tools::I2SStream i2s_stream_;
+    BlockingOutput playback_blocking_output_;
     audio_tools::VolumeStream playback_volume_stream_;
     std::unique_ptr<audio_tools::ConverterScaler<int16_t>> playback_gain_scaler_;
     audio_tools::ConverterStream<int16_t> playback_gain_stream_;
+    audio_tools::ResampleStream playback_resample_stream_;
+    audio_tools::ChannelFormatConverterStream playback_channel_converter_stream_;
     audio_tools::WAVDecoder wav_decoder_;
     audio_tools::EncodedAudioStream wav_stream_;
     audio_tools::StreamCopy wav_copy_;

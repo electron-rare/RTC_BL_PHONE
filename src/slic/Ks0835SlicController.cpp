@@ -20,9 +20,10 @@ bool Ks0835SlicController::begin(const SlicPins& pins) {
         digitalWrite(pins_.pin_line_enable, LOW);
     }
 
-    // PD must never be actively driven HIGH for KS0835-like modules.
+    // Keep PD in open-drain released state (HIGH => high-impedance).
     if (pins_.pin_pd >= 0) {
-        pinMode(pins_.pin_pd, INPUT);
+        pinMode(pins_.pin_pd, OUTPUT_OPEN_DRAIN);
+        digitalWrite(pins_.pin_pd, HIGH);
     }
 
     initialized_ = true;
@@ -79,9 +80,10 @@ void Ks0835SlicController::setPowerDown(bool enabled) {
             digitalWrite(pins_.pin_line_enable, LOW);
         }
         pinMode(pins_.pin_pd, OUTPUT_OPEN_DRAIN);
-        digitalWrite(pins_.pin_pd, LOW);
+        digitalWrite(pins_.pin_pd, HIGH);
     } else {
-        pinMode(pins_.pin_pd, INPUT);
+        pinMode(pins_.pin_pd, OUTPUT_OPEN_DRAIN);
+        digitalWrite(pins_.pin_pd, HIGH);
         if (pins_.pin_line_enable >= 0) {
             digitalWrite(pins_.pin_line_enable, HIGH);
         }

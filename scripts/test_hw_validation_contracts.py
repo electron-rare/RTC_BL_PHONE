@@ -9,6 +9,7 @@ from scripts.hw_validation import (
     evaluate_serial_smoke_contract,
     scenario_serial_audio_format_chain,
     scenario_serial_firmware_contract,
+    scenario_serial_hotline_defaults,
     scenario_serial_hook_ring_audio,
     scenario_serial_media_routing,
     scenario_serial_network,
@@ -130,9 +131,15 @@ def _status_audio_contract_payload() -> dict[str, object]:
         "playback_output_channels": 2,
         "playback_resampler_active": False,
         "playback_channel_upmix_active": True,
+        "playback_loudness_auto": False,
         "playback_loudness_gain_db": 0.0,
         "playback_limiter_active": False,
         "playback_rate_fallback": 0,
+        "playback_copy_source_bytes": 0,
+        "playback_copy_accepted_bytes": 0,
+        "playback_copy_loss_bytes": 0,
+        "playback_copy_loss_events": 0,
+        "playback_last_error": "",
     }
 
 
@@ -144,13 +151,13 @@ class SerialFirmwareContractTest(unittest.TestCase):
                     "firmware": {
                         "build_id": "Feb 26",
                         "git_sha": "abc123",
-                        "contract_version": "A252_AUDIO_CHAIN_V2",
+                        "contract_version": "A252_AUDIO_CHAIN_V4",
                     },
                     "audio": _status_audio_contract_payload(),
                 }
             ]
         )
-        result = scenario_serial_firmware_contract(fake, required_contract_version="A252_AUDIO_CHAIN_V2")
+        result = scenario_serial_firmware_contract(fake, required_contract_version="A252_AUDIO_CHAIN_V4")
         self.assertEqual(result.state, "PASS")
         self.assertEqual(result.name, "serial_firmware_contract")
 
@@ -167,7 +174,7 @@ class SerialFirmwareContractTest(unittest.TestCase):
                 }
             ]
         )
-        result = scenario_serial_firmware_contract(fake, required_contract_version="A252_AUDIO_CHAIN_V2")
+        result = scenario_serial_firmware_contract(fake, required_contract_version="A252_AUDIO_CHAIN_V4")
         self.assertEqual(result.state, "FAIL")
         self.assertFalse(result.details.get("checks", {}).get("contract_version_matches", True))
 
@@ -273,21 +280,50 @@ class SerialHookRingAudioContractTest(unittest.TestCase):
                 {"telephony": {"hook": "ON_HOOK"}, "audio": {"tone_active": False, "tone_event": "none"}},
             ]
         )
-        result = scenario_serial_hook_ring_audio(fake, require_hook_toggle=True, hook_observe_seconds=0)
+        result = scenario_serial_hook_ring_audio(fake, require_hook_toggle=False, hook_observe_seconds=0)
         self.assertEqual(result.state, "PASS")
         self.assertEqual(result.name, "serial_hook_ring_audio")
         self.assertEqual(result.details.get("checks", {}).get("hook_ok"), True)
         self.assertEqual(result.details.get("hook_validation_mode"), "BYPASSED_NON_PRESENTIEL")
 
 
+class SerialHotlineDefaultsContractTest(unittest.TestCase):
+    def test_hotline_defaults_pass_with_forced_123_mapping(self) -> None:
+        fake = _FakeSerialEndpoint(
+            [
+                {
+                    "1": {"kind": "file", "path": "/welcome.wav", "source": "AUTO"},
+                    "2": {"kind": "file", "path": "/souffle.wav", "source": "AUTO"},
+                    "3": {"kind": "file", "path": "/radio.wav", "source": "AUTO"},
+                }
+            ]
+        )
+        result = scenario_serial_hotline_defaults(fake)
+        self.assertEqual(result.state, "PASS")
+
+    def test_hotline_defaults_fail_when_order_or_path_is_wrong(self) -> None:
+        fake = _FakeSerialEndpoint(
+            [
+                {
+                    "1": {"kind": "file", "path": "/welcome.wav", "source": "AUTO"},
+                    "2": {"kind": "file", "path": "/radio.wav", "source": "AUTO"},
+                    "3": {"kind": "file", "path": "/souffle.wav", "source": "AUTO"},
+                }
+            ]
+        )
+        result = scenario_serial_hotline_defaults(fake)
+        self.assertEqual(result.state, "FAIL")
+        self.assertFalse(result.details.get("checks", {}).get("dial_2_souffle", True))
+
+
 class SerialMediaRoutingContractTest(unittest.TestCase):
     def test_media_routing_status_contract_passes(self) -> None:
         fake = _FakeSerialEndpoint(
             [
-                {"ok": True, "line": "OK DIAL_MEDIA_MAP_SET"},
+                {"ok": True, "line": "OK DIAL_MEDIA_MAP_SET_VOLATILE"},
                 {"0123456789": {"kind": "tone", "profile": "FR_FR", "event": "ringback"}},
-                {"ok": True, "line": "OK ESPNOW_CALL_MAP_SET"},
-                {"ok": False, "line": "ERR ESPNOW_CALL_MAP_SET tone_wav_deprecated_use_kind_tone LA_BUSY"},
+                {"ok": True, "line": "OK ESPNOW_CALL_MAP_SET_VOLATILE"},
+                {"ok": False, "line": "ERR ESPNOW_CALL_MAP_SET_VOLATILE tone_wav_deprecated_use_kind_tone LA_BUSY"},
                 {"LA_OK": {"kind": "tone", "profile": "FR_FR", "event": "busy"}},
                 {"ok": False, "line": "ERR PLAY tone_wav_deprecated_use_TONE_PLAY"},
                 {"ok": True, "line": "OK TONE_PLAY"},
@@ -327,6 +363,8 @@ class SerialMediaRoutingContractTest(unittest.TestCase):
                         "tone_engine": "NONE",
                     }
                 },
+                {"ok": True, "line": "OK DIAL_MEDIA_MAP_RESET_VOLATILE"},
+                {"ok": True, "line": "OK ESPNOW_CALL_MAP_RESET_VOLATILE"},
             ]
         )
         result = scenario_serial_media_routing(fake)
@@ -335,10 +373,10 @@ class SerialMediaRoutingContractTest(unittest.TestCase):
     def test_media_routing_fails_when_legacy_tone_path_is_not_rejected(self) -> None:
         fake = _FakeSerialEndpoint(
             [
-                {"ok": True, "line": "OK DIAL_MEDIA_MAP_SET"},
+                {"ok": True, "line": "OK DIAL_MEDIA_MAP_SET_VOLATILE"},
                 {"0123456789": {"kind": "tone", "profile": "FR_FR", "event": "ringback"}},
-                {"ok": True, "line": "OK ESPNOW_CALL_MAP_SET"},
-                {"ok": False, "line": "ERR ESPNOW_CALL_MAP_SET tone_wav_deprecated_use_kind_tone LA_BUSY"},
+                {"ok": True, "line": "OK ESPNOW_CALL_MAP_SET_VOLATILE"},
+                {"ok": False, "line": "ERR ESPNOW_CALL_MAP_SET_VOLATILE tone_wav_deprecated_use_kind_tone LA_BUSY"},
                 {"LA_OK": {"kind": "tone", "profile": "FR_FR", "event": "busy"}},
                 {"ok": True, "line": "OK PLAY"},
                 {
@@ -377,6 +415,8 @@ class SerialMediaRoutingContractTest(unittest.TestCase):
                         "tone_engine": "NONE",
                     }
                 },
+                {"ok": True, "line": "OK DIAL_MEDIA_MAP_RESET_VOLATILE"},
+                {"ok": True, "line": "OK ESPNOW_CALL_MAP_RESET_VOLATILE"},
             ]
         )
         result = scenario_serial_media_routing(fake)
@@ -411,10 +451,13 @@ class SerialAudioFormatChainContractTest(unittest.TestCase):
                     "loudness_gain_db": 2.5,
                     "limiter_active": False,
                     "rate_fallback": 0,
+                    "data_size_bytes": 3200,
+                    "duration_ms": 100,
                 },
                 {"ok": True, "line": "OK PLAY"},
                 {
                     "audio": {
+                        "playing": True,
                         "tone_route_active": False,
                         "tone_rendering": False,
                         "playback_input_sample_rate": 16000,
@@ -425,9 +468,39 @@ class SerialAudioFormatChainContractTest(unittest.TestCase):
                         "playback_output_channels": 2,
                         "playback_resampler_active": False,
                         "playback_channel_upmix_active": True,
+                        "playback_loudness_auto": True,
                         "playback_loudness_gain_db": 2.5,
                         "playback_limiter_active": False,
                         "playback_rate_fallback": 0,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 1024,
+                        "playback_copy_loss_bytes": 0,
+                        "playback_copy_loss_events": 0,
+                        "playback_last_error": "",
+                    }
+                },
+                {
+                    "audio": {
+                        "playing": False,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 16000,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 1,
+                        "playback_output_sample_rate": 16000,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": False,
+                        "playback_channel_upmix_active": True,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 2.5,
+                        "playback_limiter_active": False,
+                        "playback_rate_fallback": 0,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 1024,
+                        "playback_copy_loss_bytes": 0,
+                        "playback_copy_loss_events": 0,
+                        "playback_last_error": "",
                     }
                 },
             ]
@@ -435,6 +508,8 @@ class SerialAudioFormatChainContractTest(unittest.TestCase):
         result = scenario_serial_audio_format_chain(fake, "/welcome.wav")
         self.assertEqual(result.state, "PASS")
         self.assertTrue(result.details.get("checks", {}).get("status_matches_probe_rate"))
+        self.assertTrue(result.details.get("checks", {}).get("status_playback_window_observed"))
+        self.assertTrue(result.details.get("checks", {}).get("status_playback_duration_within_tolerance"))
 
     def test_audio_format_chain_fails_when_probe_not_available(self) -> None:
         fake = _FakeSerialEndpoint(
@@ -450,6 +525,390 @@ class SerialAudioFormatChainContractTest(unittest.TestCase):
         result = scenario_serial_audio_format_chain(fake, "/welcome.wav")
         self.assertEqual(result.state, "FAIL")
         self.assertFalse(result.details.get("checks", {}).get("audio_probe_found_supported_file", True))
+
+    def test_audio_format_chain_fails_when_playback_window_is_missed(self) -> None:
+        fake = _FakeSerialEndpoint(
+            [
+                {
+                    "clock_policy": "HYBRID_TELCO",
+                    "wav_loudness_policy": "AUTO_NORMALIZE_LIMITER",
+                },
+                {
+                    "ok": True,
+                    "path": "/welcome.wav",
+                    "source": "LITTLEFS",
+                    "input_sample_rate": 16000,
+                    "input_bits_per_sample": 16,
+                    "input_channels": 1,
+                    "output_sample_rate": 16000,
+                    "output_bits_per_sample": 16,
+                    "output_channels": 2,
+                    "resampler_active": False,
+                    "channel_upmix_active": True,
+                    "loudness_auto": True,
+                    "loudness_gain_db": 1.0,
+                    "limiter_active": False,
+                    "rate_fallback": 0,
+                    "data_size_bytes": 3200,
+                    "duration_ms": 100,
+                },
+                {"ok": True, "line": "OK PLAY"},
+                *[
+                    {
+                        "audio": {
+                            "playing": False,
+                            "tone_route_active": False,
+                            "tone_rendering": False,
+                            "playback_input_sample_rate": 0,
+                            "playback_input_bits_per_sample": 0,
+                            "playback_input_channels": 0,
+                            "playback_output_sample_rate": 16000,
+                            "playback_output_bits_per_sample": 16,
+                            "playback_output_channels": 2,
+                            "playback_resampler_active": False,
+                            "playback_channel_upmix_active": True,
+                            "playback_loudness_auto": True,
+                            "playback_loudness_gain_db": 0.0,
+                            "playback_limiter_active": False,
+                            "playback_rate_fallback": 0,
+                            "playback_copy_source_bytes": 0,
+                            "playback_copy_accepted_bytes": 0,
+                            "playback_copy_loss_bytes": 0,
+                            "playback_copy_loss_events": 0,
+                            "playback_last_error": "",
+                        }
+                    }
+                    for _ in range(20)
+                ],
+            ]
+        )
+        result = scenario_serial_audio_format_chain(fake, "/welcome.wav")
+        self.assertEqual(result.state, "FAIL")
+        self.assertFalse(result.details.get("checks", {}).get("status_playback_window_observed", True))
+
+    def test_audio_format_chain_fails_on_copy_loss_counters(self) -> None:
+        fake = _FakeSerialEndpoint(
+            [
+                {
+                    "clock_policy": "HYBRID_TELCO",
+                    "wav_loudness_policy": "AUTO_NORMALIZE_LIMITER",
+                },
+                {
+                    "ok": True,
+                    "path": "/welcome.wav",
+                    "source": "LITTLEFS",
+                    "input_sample_rate": 22050,
+                    "input_bits_per_sample": 16,
+                    "input_channels": 1,
+                    "output_sample_rate": 22050,
+                    "output_bits_per_sample": 16,
+                    "output_channels": 2,
+                    "resampler_active": False,
+                    "channel_upmix_active": True,
+                    "loudness_auto": True,
+                    "loudness_gain_db": 1.0,
+                    "limiter_active": False,
+                    "rate_fallback": 0,
+                    "data_size_bytes": 4410,
+                    "duration_ms": 100,
+                },
+                {"ok": True, "line": "OK PLAY"},
+                {
+                    "audio": {
+                        "playing": True,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 22050,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 1,
+                        "playback_output_sample_rate": 22050,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": False,
+                        "playback_channel_upmix_active": True,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 1.0,
+                        "playback_limiter_active": False,
+                        "playback_rate_fallback": 0,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 900,
+                        "playback_copy_loss_bytes": 124,
+                        "playback_copy_loss_events": 1,
+                        "playback_last_error": "copy_output_backpressure_drop",
+                    }
+                },
+                {
+                    "audio": {
+                        "playing": False,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 22050,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 1,
+                        "playback_output_sample_rate": 22050,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": False,
+                        "playback_channel_upmix_active": True,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 1.0,
+                        "playback_limiter_active": False,
+                        "playback_rate_fallback": 0,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 900,
+                        "playback_copy_loss_bytes": 124,
+                        "playback_copy_loss_events": 1,
+                        "playback_last_error": "copy_output_backpressure_drop",
+                    }
+                },
+            ]
+        )
+        result = scenario_serial_audio_format_chain(fake, "/welcome.wav")
+        self.assertEqual(result.state, "FAIL")
+        self.assertFalse(result.details.get("checks", {}).get("status_copy_loss_events_zero", True))
+
+    def test_audio_format_chain_fails_when_playback_duration_is_out_of_tolerance(self) -> None:
+        fake = _FakeSerialEndpoint(
+            [
+                {
+                    "clock_policy": "HYBRID_TELCO",
+                    "wav_loudness_policy": "AUTO_NORMALIZE_LIMITER",
+                },
+                {
+                    "ok": True,
+                    "path": "/welcome.wav",
+                    "source": "LITTLEFS",
+                    "input_sample_rate": 16000,
+                    "input_bits_per_sample": 16,
+                    "input_channels": 1,
+                    "output_sample_rate": 16000,
+                    "output_bits_per_sample": 16,
+                    "output_channels": 2,
+                    "resampler_active": False,
+                    "channel_upmix_active": True,
+                    "loudness_auto": True,
+                    "loudness_gain_db": 1.0,
+                    "limiter_active": False,
+                    "rate_fallback": 0,
+                    "data_size_bytes": 3200,
+                    "duration_ms": 400,
+                },
+                {"ok": True, "line": "OK PLAY"},
+                {
+                    "audio": {
+                        "playing": True,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 16000,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 1,
+                        "playback_output_sample_rate": 16000,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": False,
+                        "playback_channel_upmix_active": True,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 1.0,
+                        "playback_limiter_active": False,
+                        "playback_rate_fallback": 0,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 1024,
+                        "playback_copy_loss_bytes": 0,
+                        "playback_copy_loss_events": 0,
+                        "playback_last_error": "",
+                    }
+                },
+                {
+                    "audio": {
+                        "playing": False,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 16000,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 1,
+                        "playback_output_sample_rate": 16000,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": False,
+                        "playback_channel_upmix_active": True,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 1.0,
+                        "playback_limiter_active": False,
+                        "playback_rate_fallback": 0,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 1024,
+                        "playback_copy_loss_bytes": 0,
+                        "playback_copy_loss_events": 0,
+                        "playback_last_error": "",
+                    }
+                },
+            ]
+        )
+        result = scenario_serial_audio_format_chain(fake, "/welcome.wav")
+        self.assertEqual(result.state, "FAIL")
+        self.assertFalse(result.details.get("checks", {}).get("status_playback_duration_within_tolerance", True))
+
+    def test_audio_format_chain_fails_when_loudness_policy_not_applied(self) -> None:
+        fake = _FakeSerialEndpoint(
+            [
+                {
+                    "clock_policy": "HYBRID_TELCO",
+                    "wav_loudness_policy": "FIXED_GAIN_ONLY",
+                },
+                {
+                    "ok": True,
+                    "path": "/welcome.wav",
+                    "source": "LITTLEFS",
+                    "input_sample_rate": 32000,
+                    "input_bits_per_sample": 16,
+                    "input_channels": 1,
+                    "output_sample_rate": 32000,
+                    "output_bits_per_sample": 16,
+                    "output_channels": 2,
+                    "resampler_active": False,
+                    "channel_upmix_active": True,
+                    "loudness_auto": True,
+                    "loudness_gain_db": 3.0,
+                    "limiter_active": True,
+                    "rate_fallback": 0,
+                    "data_size_bytes": 6400,
+                    "duration_ms": 100,
+                },
+                {"ok": True, "line": "OK PLAY"},
+                {
+                    "audio": {
+                        "playing": True,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 32000,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 1,
+                        "playback_output_sample_rate": 32000,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": False,
+                        "playback_channel_upmix_active": True,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 3.0,
+                        "playback_limiter_active": True,
+                        "playback_rate_fallback": 0,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 1024,
+                        "playback_copy_loss_bytes": 0,
+                        "playback_copy_loss_events": 0,
+                        "playback_last_error": "",
+                    }
+                },
+                {
+                    "audio": {
+                        "playing": False,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 32000,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 1,
+                        "playback_output_sample_rate": 32000,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": False,
+                        "playback_channel_upmix_active": True,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 3.0,
+                        "playback_limiter_active": True,
+                        "playback_rate_fallback": 0,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 1024,
+                        "playback_copy_loss_bytes": 0,
+                        "playback_copy_loss_events": 0,
+                        "playback_last_error": "",
+                    }
+                },
+            ]
+        )
+        result = scenario_serial_audio_format_chain(fake, "/welcome.wav")
+        self.assertEqual(result.state, "FAIL")
+        self.assertFalse(result.details.get("checks", {}).get("probe_loudness_matches_policy", True))
+
+    def test_audio_format_chain_fails_when_adaptive_rate_is_not_honored(self) -> None:
+        fake = _FakeSerialEndpoint(
+            [
+                {
+                    "clock_policy": "HYBRID_TELCO",
+                    "wav_loudness_policy": "AUTO_NORMALIZE_LIMITER",
+                },
+                {
+                    "ok": True,
+                    "path": "/welcome.wav",
+                    "source": "LITTLEFS",
+                    "input_sample_rate": 44100,
+                    "input_bits_per_sample": 16,
+                    "input_channels": 2,
+                    "output_sample_rate": 8000,
+                    "output_bits_per_sample": 16,
+                    "output_channels": 2,
+                    "resampler_active": True,
+                    "channel_upmix_active": False,
+                    "loudness_auto": True,
+                    "loudness_gain_db": 0.5,
+                    "limiter_active": False,
+                    "rate_fallback": 8000,
+                    "data_size_bytes": 8820,
+                    "duration_ms": 100,
+                },
+                {"ok": True, "line": "OK PLAY"},
+                {
+                    "audio": {
+                        "playing": True,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 44100,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 2,
+                        "playback_output_sample_rate": 8000,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": True,
+                        "playback_channel_upmix_active": False,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 0.5,
+                        "playback_limiter_active": False,
+                        "playback_rate_fallback": 8000,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 1024,
+                        "playback_copy_loss_bytes": 0,
+                        "playback_copy_loss_events": 0,
+                        "playback_last_error": "",
+                    }
+                },
+                {
+                    "audio": {
+                        "playing": False,
+                        "tone_route_active": False,
+                        "tone_rendering": False,
+                        "playback_input_sample_rate": 44100,
+                        "playback_input_bits_per_sample": 16,
+                        "playback_input_channels": 2,
+                        "playback_output_sample_rate": 8000,
+                        "playback_output_bits_per_sample": 16,
+                        "playback_output_channels": 2,
+                        "playback_resampler_active": True,
+                        "playback_channel_upmix_active": False,
+                        "playback_loudness_auto": True,
+                        "playback_loudness_gain_db": 0.5,
+                        "playback_limiter_active": False,
+                        "playback_rate_fallback": 8000,
+                        "playback_copy_source_bytes": 1024,
+                        "playback_copy_accepted_bytes": 1024,
+                        "playback_copy_loss_bytes": 0,
+                        "playback_copy_loss_events": 0,
+                        "playback_last_error": "",
+                    }
+                },
+            ]
+        )
+        result = scenario_serial_audio_format_chain(fake, "/welcome.wav")
+        self.assertEqual(result.state, "FAIL")
+        self.assertFalse(result.details.get("checks", {}).get("audio_probe_adaptive_rate_expected", True))
 
 
 if __name__ == "__main__":

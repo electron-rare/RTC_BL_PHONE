@@ -11,6 +11,7 @@ EspNowBridge* EspNowBridge::instance_ = nullptr;
 namespace {
 constexpr size_t kEspNowMaxPayloadBytes = 240;
 constexpr size_t kEspNowMaxPeers = 16;
+constexpr const char* kDefaultEspNowDeviceName = "HOTLINE_PHONE";
 
 void enforceEspNowCoexPolicy() {
     WiFi.setSleep(true);
@@ -37,6 +38,11 @@ bool parseTargetMac(const String& target, uint8_t out[6], bool& is_broadcast) {
     }
     return A252ConfigStore::parseMac(normalized, out);
 }
+
+String normalizeOrDefaultDeviceName(const String& name) {
+    const String normalized = A252ConfigStore::normalizeDeviceName(name);
+    return normalized.isEmpty() ? String(kDefaultEspNowDeviceName) : normalized;
+}
 }
 
 EspNowBridge::EspNowBridge() {
@@ -49,6 +55,7 @@ bool EspNowBridge::begin(const EspNowPeerStore& initial_peers) {
     }
 
     store_ = initial_peers;
+    store_.device_name = normalizeOrDefaultDeviceName(store_.device_name);
 
     const wifi_mode_t current_mode = WiFi.getMode();
     if (current_mode == WIFI_MODE_NULL) {
@@ -102,6 +109,22 @@ bool EspNowBridge::deletePeer(const String& mac) {
 
 const std::vector<String>& EspNowBridge::peers() const {
     return store_.peers;
+}
+
+const String& EspNowBridge::deviceName() const {
+    return store_.device_name;
+}
+
+bool EspNowBridge::setDeviceName(const String& name, bool persist) {
+    const String normalized = A252ConfigStore::normalizeDeviceName(name);
+    if (normalized.isEmpty()) {
+        return false;
+    }
+    store_.device_name = normalized;
+    if (persist) {
+        return A252ConfigStore::saveEspNowPeers(store_);
+    }
+    return true;
 }
 
 bool EspNowBridge::sendJson(const String& target, const String& json_payload) {
@@ -161,6 +184,7 @@ void EspNowBridge::setCommandCallback(std::function<void(const String&, const Js
 
 void EspNowBridge::statusToJson(JsonObject obj) const {
     obj["ready"] = ready_;
+    obj["device_name"] = store_.device_name;
     obj["peer_count"] = static_cast<uint32_t>(store_.peers.size());
     obj["tx_ok"] = tx_ok_;
     obj["tx_fail"] = tx_fail_;

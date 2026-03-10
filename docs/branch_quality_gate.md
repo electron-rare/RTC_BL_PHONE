@@ -28,8 +28,9 @@ Le script `scripts/branch_gate.sh` exécute les contrôles suivants, dans l’or
   - `playback_input_sample_rate/bits_per_sample/channels`
   - `playback_output_sample_rate/bits_per_sample/channels`
   - `playback_resampler_active`, `playback_channel_upmix_active`
-  - `playback_loudness_gain_db`, `playback_limiter_active`, `playback_rate_fallback`
-- **Fingerprint firmware** : `STATUS.firmware` doit exposer `build_id`, `git_sha`, `contract_version` (contrat attendu: `A252_AUDIO_CHAIN_V2`).
+  - `playback_loudness_auto`, `playback_loudness_gain_db`, `playback_limiter_active`, `playback_rate_fallback`
+  - `playback_copy_source_bytes`, `playback_copy_accepted_bytes`, `playback_copy_loss_bytes`, `playback_copy_loss_events`, `playback_last_error`
+- **Fingerprint firmware** : `STATUS.firmware` doit exposer `build_id`, `git_sha`, `contract_version` (contrat attendu: `A252_AUDIO_CHAIN_V4`).
 - **Board contract A252** : référence matérielle canonique dans [docs/a252_board_spec.md](./a252_board_spec.md) et [docs/specs/ai_thinker_esp32_a1s_es8388_n4r8.agent.v2.yaml](./specs/ai_thinker_esp32_a1s_es8388_n4r8.agent.v2.yaml).
 
 ## Cible CI

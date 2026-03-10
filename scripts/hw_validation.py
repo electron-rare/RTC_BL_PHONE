@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
 
 VALID_STATES = {"PASS", "FAIL", "MANUAL_PASS", "MANUAL_FAIL", "MANUAL_SKIP"}
 OPTIONAL_SERIAL_COMMANDS = {"WIFI_SCAN", "ESPNOW_STATUS"}
-EXPECTED_FIRMWARE_CONTRACT_VERSION = "A252_AUDIO_CHAIN_V2"
+EXPECTED_FIRMWARE_CONTRACT_VERSION = "A252_AUDIO_CHAIN_V4"
 SUPPORTED_INPUT_BITS = {8, 16, 24, 32}
 SUPPORTED_OUTPUT_BITS = {16}
 SUPPORTED_CHANNELS = {1, 2}
@@ -40,9 +40,15 @@ REQUIRED_AUDIO_STATUS_KEYS = (
     "playback_output_channels",
     "playback_resampler_active",
     "playback_channel_upmix_active",
+    "playback_loudness_auto",
     "playback_loudness_gain_db",
     "playback_limiter_active",
     "playback_rate_fallback",
+    "playback_copy_source_bytes",
+    "playback_copy_accepted_bytes",
+    "playback_copy_loss_bytes",
+    "playback_copy_loss_events",
+    "playback_last_error",
 )
 REQUIRED_AUDIO_PROBE_KEYS = (
     "input_sample_rate",
@@ -53,9 +59,12 @@ REQUIRED_AUDIO_PROBE_KEYS = (
     "output_channels",
     "resampler_active",
     "channel_upmix_active",
+    "loudness_auto",
     "loudness_gain_db",
     "limiter_active",
     "rate_fallback",
+    "data_size_bytes",
+    "duration_ms",
 )
 
 
@@ -86,6 +95,37 @@ def _extract_audio_status(status_payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(audio, dict):
         return {}
     return audio
+
+
+def _parse_json_from_line(line: str) -> Optional[Any]:
+    candidates: List[str] = []
+    stripped = line.strip()
+    if stripped:
+        candidates.append(stripped)
+    if "{" in line and "}" in line:
+        start = line.find("{")
+        end = line.rfind("}")
+        if 0 <= start < end:
+            candidates.append(line[start : end + 1])
+    if "[" in line and "]" in line:
+        start = line.find("[")
+        end = line.rfind("]")
+        if 0 <= start < end:
+            candidates.append(line[start : end + 1])
+
+    for candidate in candidates:
+        text = candidate.strip()
+        if not text:
+            continue
+        if text[0] not in ("{", "["):
+            continue
+        if text[-1] not in ("}", "]"):
+            continue
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 class SerialEndpoint:
@@ -126,18 +166,25 @@ class SerialEndpoint:
                 continue
             last_line = line
             print(f"[{self.port}] {line}")
-            if line and line[0] in ("{", "[") and line[-1] in ("}", "]"):
-                if expect in {"any", "json"}:
-                    try:
-                        return json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                continue
-            if line.startswith("OK ") or line.startswith("ERR "):
+            if expect in {"any", "json"}:
+                parsed = _parse_json_from_line(line)
+                if parsed is not None:
+                    return parsed
+            ok_pos = line.find("OK ")
+            err_pos = line.find("ERR ")
+            ack_pos = -1
+            ack_ok = False
+            if ok_pos >= 0 and (err_pos < 0 or ok_pos <= err_pos):
+                ack_pos = ok_pos
+                ack_ok = True
+            elif err_pos >= 0:
+                ack_pos = err_pos
+                ack_ok = False
+            if ack_pos >= 0:
                 if expect in {"any", "ack"}:
-                    return {"ok": line.startswith("OK "), "line": line}
+                    return {"ok": ack_ok, "line": line[ack_pos:]}
                 continue
-            if line == "PONG":
+            if line == "PONG" or "PONG" in line:
                 if expect in {"any", "pong", "ack"}:
                     return {"ok": True, "result": "PONG"}
                 continue
@@ -680,11 +727,11 @@ def scenario_serial_media_routing(dev: SerialEndpoint) -> ScenarioResult:
         espnow_payload = '{"LA_OK":{"kind":"tone","profile":"FR_FR","event":"busy"}}'
         espnow_legacy_payload = '{"LA_BUSY":"/assets/wav/FR_FR/busy.wav"}'
 
-        details["dial_media_map_set"] = dev.command(f"DIAL_MEDIA_MAP_SET {dial_payload}", expect="ack")
+        details["dial_media_map_set"] = dev.command(f"DIAL_MEDIA_MAP_SET_VOLATILE {dial_payload}", expect="ack")
         details["dial_media_map_get"] = dev.command("DIAL_MEDIA_MAP_GET", expect="json")
-        details["espnow_call_map_set"] = dev.command(f"ESPNOW_CALL_MAP_SET {espnow_payload}", expect="ack")
+        details["espnow_call_map_set"] = dev.command(f"ESPNOW_CALL_MAP_SET_VOLATILE {espnow_payload}", expect="ack")
         details["espnow_call_map_set_legacy_tone"] = dev.command(
-            f"ESPNOW_CALL_MAP_SET {espnow_legacy_payload}",
+            f"ESPNOW_CALL_MAP_SET_VOLATILE {espnow_legacy_payload}",
             expect="ack",
         )
         details["espnow_call_map_get"] = dev.command("ESPNOW_CALL_MAP_GET", expect="json")
@@ -702,6 +749,8 @@ def scenario_serial_media_routing(dev: SerialEndpoint) -> ScenarioResult:
         details["tone_stop"] = dev.command("TONE_STOP", expect="ack")
         time.sleep(0.2)
         details["status_after_tone_stop"] = dev.command("STATUS", expect="json")
+        details["dial_media_map_reset_volatile"] = dev.command("DIAL_MEDIA_MAP_RESET_VOLATILE", expect="ack")
+        details["espnow_call_map_reset_volatile"] = dev.command("ESPNOW_CALL_MAP_RESET_VOLATILE", expect="ack")
 
         status_audio_play = (
             details["status_after_tone_play"].get("audio", {}) if isinstance(details["status_after_tone_play"], dict) else {}
@@ -740,6 +789,8 @@ def scenario_serial_media_routing(dev: SerialEndpoint) -> ScenarioResult:
             "dial_media_map_set_ok": _is_success_response(details["dial_media_map_set"]),
             "espnow_call_map_set_ok": _is_success_response(details["espnow_call_map_set"]),
             "espnow_call_map_set_legacy_tone_rejected": legacy_map_rejected,
+            "dial_media_map_reset_volatile_ok": _is_success_response(details["dial_media_map_reset_volatile"]),
+            "espnow_call_map_reset_volatile_ok": _is_success_response(details["espnow_call_map_reset_volatile"]),
             "dial_media_map_status_present": isinstance(dial_map, dict),
             "espnow_call_map_status_present": isinstance(espnow_map, dict),
             "play_legacy_tone_rejected": legacy_rejected,
@@ -778,6 +829,44 @@ def scenario_serial_media_routing(dev: SerialEndpoint) -> ScenarioResult:
         return ScenarioResult("serial_media_routing", "PASS" if ok else "FAIL", details)
     except Exception as exc:
         return ScenarioResult("serial_media_routing", "FAIL", {"error": str(exc), **details})
+
+
+def _extract_route_file_path(route_payload: Any) -> str:
+    if isinstance(route_payload, str):
+        return route_payload.strip()
+    if not isinstance(route_payload, dict):
+        return ""
+    path = route_payload.get("path")
+    if isinstance(path, str):
+        return path.strip()
+    return ""
+
+
+def scenario_serial_hotline_defaults(dev: SerialEndpoint) -> ScenarioResult:
+    details: Dict[str, Any] = {}
+    try:
+        expected = {
+            "1": "/welcome.wav",
+            "2": "/souffle.wav",
+            "3": "/radio.wav",
+        }
+        details["dial_media_map_get"] = dev.command("DIAL_MEDIA_MAP_GET", expect="json")
+        dial_map = details["dial_media_map_get"] if isinstance(details["dial_media_map_get"], dict) else {}
+        found_paths = {digit: _extract_route_file_path(dial_map.get(digit)) for digit in expected}
+        details["expected"] = expected
+        details["found_paths"] = found_paths
+
+        checks = {
+            "dial_media_map_is_object": isinstance(dial_map, dict),
+            "dial_media_map_exact_keys": isinstance(dial_map, dict) and set(dial_map.keys()) == set(expected.keys()),
+            "dial_1_welcome": found_paths.get("1") == expected["1"],
+            "dial_2_souffle": found_paths.get("2") == expected["2"],
+            "dial_3_radio": found_paths.get("3") == expected["3"],
+        }
+        details["checks"] = checks
+        return ScenarioResult("serial_hotline_defaults", "PASS" if all(checks.values()) else "FAIL", details)
+    except Exception as exc:
+        return ScenarioResult("serial_hotline_defaults", "FAIL", {"error": str(exc), **details})
 
 
 def _candidate_probe_paths(preferred_path: str) -> List[str]:
@@ -847,15 +936,77 @@ def scenario_serial_audio_format_chain(dev: SerialEndpoint, audio_probe_path: st
             retry_delay_s=0.3,
         )
 
-        time.sleep(0.35)
-        details["status_after_play"] = _command_with_retry(
-            dev,
-            "STATUS",
-            expect="json",
-            timeout_s=12.0,
-            attempts=4,
-            retry_delay_s=0.6,
+        status_polls: List[Dict[str, Any]] = []
+        playback_observed_after_play = False
+        observed_status: Dict[str, Any] = {}
+        observed_status_playing: Dict[str, Any] = {}
+        terminal_status: Dict[str, Any] = {}
+        probe_duration_ms = probe.get("duration_ms") if isinstance(probe.get("duration_ms"), int) else 0
+        poll_window_s = 4.0
+        if probe_duration_ms > 0:
+            poll_window_s = min(20.0, max(4.0, (probe_duration_ms / 1000.0) * 2.2 + 1.5))
+        max_polls = max(12, min(20, int(poll_window_s / 0.10)))
+        poll_interval_s = 0.10
+
+        playback_started_at: Optional[float] = None
+        playback_last_true_at: Optional[float] = None
+        poll_start = time.monotonic()
+        while (time.monotonic() - poll_start) < poll_window_s and len(status_polls) < max_polls:
+            polled_status = _command_with_retry(
+                dev,
+                "STATUS",
+                expect="json",
+                timeout_s=12.0,
+                attempts=2,
+                retry_delay_s=0.2,
+            )
+            status_polls.append(polled_status)
+            poll_audio = _extract_audio_status(polled_status if isinstance(polled_status, dict) else {})
+            now = time.monotonic()
+            playing_value = poll_audio.get("playing")
+            if isinstance(playing_value, bool):
+                if playing_value:
+                    if playback_started_at is None:
+                        playback_started_at = now
+                    playback_last_true_at = now
+                    playback_observed_after_play = True
+                    observed_status_playing = polled_status
+                    observed_status = polled_status
+                elif playback_started_at is not None:
+                    terminal_status = polled_status
+                    break
+            if not observed_status and isinstance(poll_audio.get("playback_input_sample_rate"), int):
+                if poll_audio.get("playback_input_sample_rate", 0) > 0:
+                    observed_status = polled_status
+            time.sleep(poll_interval_s)
+        if observed_status_playing:
+            observed_status = observed_status_playing
+        if not observed_status and status_polls:
+            observed_status = status_polls[-1]
+        if not terminal_status and status_polls:
+            terminal_status = status_polls[-1]
+
+        observed_playback_duration_ms = 0
+        if playback_started_at is not None and playback_last_true_at is not None and playback_last_true_at >= playback_started_at:
+            observed_seconds = (playback_last_true_at - playback_started_at) + poll_interval_s
+            observed_playback_duration_ms = max(0, int(round(observed_seconds * 1000.0)))
+
+        playback_duration_lower_ms = int(round(float(probe_duration_ms) * 0.7)) if probe_duration_ms > 0 else 0
+        playback_duration_upper_ms = int(round(float(probe_duration_ms) * 1.4)) if probe_duration_ms > 0 else 0
+        playback_duration_within_tolerance = (
+            probe_duration_ms > 0
+            and observed_playback_duration_ms > 0
+            and playback_duration_lower_ms <= observed_playback_duration_ms <= playback_duration_upper_ms
         )
+        details["status_after_play_polls"] = status_polls
+        details["status_after_play"] = observed_status
+        details["status_after_play_terminal"] = terminal_status
+        details["probe_duration_ms"] = probe_duration_ms
+        details["observed_playback_duration_ms"] = observed_playback_duration_ms
+        details["playback_duration_tolerance_ms"] = {
+            "lower": playback_duration_lower_ms,
+            "upper": playback_duration_upper_ms,
+        }
 
         policy = details["audio_policy_get"] if isinstance(details["audio_policy_get"], dict) else {}
         status_audio = _extract_audio_status(
@@ -864,31 +1015,31 @@ def scenario_serial_audio_format_chain(dev: SerialEndpoint, audio_probe_path: st
         status_missing = [key for key in REQUIRED_AUDIO_STATUS_KEYS if key not in status_audio]
         status_fallback = status_audio.get("playback_rate_fallback")
         probe_fallback = probe.get("rate_fallback")
-        warnings: List[str] = []
-        playback_observed_after_play = isinstance(status_audio.get("playback_input_sample_rate"), int) and (
-            status_audio.get("playback_input_sample_rate", 0) > 0
-        )
-        if not playback_observed_after_play:
-            warnings.append("status_playback_window_missed")
+        probe_loudness_auto = probe.get("loudness_auto")
+        status_loudness_auto = status_audio.get("playback_loudness_auto")
+        expected_loudness_auto = str(policy.get("wav_loudness_policy", "")).upper() == "AUTO_NORMALIZE_LIMITER"
+        probe_gain = probe.get("loudness_gain_db")
+        status_gain = status_audio.get("playback_loudness_gain_db")
+        probe_limiter = probe.get("limiter_active")
+        status_limiter = status_audio.get("playback_limiter_active")
 
-        status_matches_probe_rate = (
-            status_audio.get("playback_output_sample_rate") == probe.get("output_sample_rate")
-            if playback_observed_after_play
-            else True
-        )
-        status_matches_probe_bits = (
-            status_audio.get("playback_output_bits_per_sample") == probe.get("output_bits_per_sample")
-            if playback_observed_after_play
-            else True
-        )
-        status_matches_probe_channels = (
-            status_audio.get("playback_output_channels") == probe.get("output_channels")
-            if playback_observed_after_play
-            else True
-        )
-        status_matches_probe_fallback = (
-            status_fallback == probe_fallback if playback_observed_after_play else True
-        )
+        probe_input_rate = probe.get("input_sample_rate")
+        probe_output_rate = probe.get("output_sample_rate")
+        adaptive_rate_expected = False
+        if isinstance(probe_input_rate, int) and isinstance(probe_output_rate, int):
+            if probe_input_rate in SUPPORTED_OUTPUT_SAMPLE_RATES:
+                adaptive_rate_expected = (probe_output_rate == probe_input_rate) and (probe_fallback == 0)
+            else:
+                adaptive_rate_expected = (
+                    probe_output_rate in SUPPORTED_OUTPUT_SAMPLE_RATES
+                    and probe_output_rate != probe_input_rate
+                    and probe_fallback == probe_output_rate
+                )
+
+        status_matches_probe_rate = status_audio.get("playback_output_sample_rate") == probe.get("output_sample_rate")
+        status_matches_probe_bits = status_audio.get("playback_output_bits_per_sample") == probe.get("output_bits_per_sample")
+        status_matches_probe_channels = status_audio.get("playback_output_channels") == probe.get("output_channels")
+        status_matches_probe_fallback = status_fallback == probe_fallback
 
         checks = {
             "audio_policy_get_is_json": isinstance(policy, dict),
@@ -903,19 +1054,56 @@ def scenario_serial_audio_format_chain(dev: SerialEndpoint, audio_probe_path: st
             "audio_probe_output_channels_supported": probe.get("output_channels") in SUPPORTED_CHANNELS,
             "audio_probe_resampler_flag_bool": isinstance(probe.get("resampler_active"), bool),
             "audio_probe_upmix_flag_bool": isinstance(probe.get("channel_upmix_active"), bool),
+            "audio_probe_loudness_auto_bool": isinstance(probe_loudness_auto, bool),
             "audio_probe_loudness_number": _is_number(probe.get("loudness_gain_db")),
             "audio_probe_limiter_bool": isinstance(probe.get("limiter_active"), bool),
             "audio_probe_rate_fallback_number": isinstance(probe_fallback, int) and probe_fallback >= 0,
+            "audio_probe_data_size_bytes_number": isinstance(probe.get("data_size_bytes"), int)
+            and probe.get("data_size_bytes") >= 0,
+            "audio_probe_duration_ms_positive": isinstance(probe.get("duration_ms"), int) and probe.get("duration_ms") > 0,
+            "audio_probe_adaptive_rate_expected": adaptive_rate_expected,
             "play_ok": _is_success_response(details["play"]),
+            "status_playback_window_observed": playback_observed_after_play,
+            "status_playback_duration_within_tolerance": playback_duration_within_tolerance,
             "status_audio_fields_present": not status_missing,
             "status_output_rate_supported": status_audio.get("playback_output_sample_rate") in SUPPORTED_OUTPUT_SAMPLE_RATES,
             "status_output_bits_supported": status_audio.get("playback_output_bits_per_sample") in SUPPORTED_OUTPUT_BITS,
             "status_output_channels_supported": status_audio.get("playback_output_channels") in SUPPORTED_CHANNELS,
             "status_resampler_bool": isinstance(status_audio.get("playback_resampler_active"), bool),
             "status_upmix_bool": isinstance(status_audio.get("playback_channel_upmix_active"), bool),
+            "status_loudness_auto_bool": isinstance(status_loudness_auto, bool),
             "status_loudness_number": _is_number(status_audio.get("playback_loudness_gain_db")),
             "status_limiter_bool": isinstance(status_audio.get("playback_limiter_active"), bool),
             "status_fallback_number": isinstance(status_fallback, int) and status_fallback >= 0,
+            "status_copy_source_number": isinstance(status_audio.get("playback_copy_source_bytes"), int)
+            and status_audio.get("playback_copy_source_bytes") >= 0,
+            "status_copy_accepted_number": isinstance(status_audio.get("playback_copy_accepted_bytes"), int)
+            and status_audio.get("playback_copy_accepted_bytes") >= 0,
+            "status_copy_loss_bytes_number": isinstance(status_audio.get("playback_copy_loss_bytes"), int)
+            and status_audio.get("playback_copy_loss_bytes") >= 0,
+            "status_copy_loss_events_number": isinstance(status_audio.get("playback_copy_loss_events"), int)
+            and status_audio.get("playback_copy_loss_events") >= 0,
+            "status_copy_loss_bytes_zero": status_audio.get("playback_copy_loss_bytes") == 0,
+            "status_copy_loss_events_zero": status_audio.get("playback_copy_loss_events") == 0,
+            "status_copy_accounting_monotonic": isinstance(status_audio.get("playback_copy_source_bytes"), int)
+            and isinstance(status_audio.get("playback_copy_accepted_bytes"), int)
+            and status_audio.get("playback_copy_accepted_bytes") <= status_audio.get("playback_copy_source_bytes"),
+            "probe_loudness_matches_policy": isinstance(probe_loudness_auto, bool)
+            and probe_loudness_auto == expected_loudness_auto,
+            "status_loudness_matches_policy": isinstance(status_loudness_auto, bool)
+            and status_loudness_auto == expected_loudness_auto,
+            "probe_fixed_gain_consistent": expected_loudness_auto
+            or (
+                _is_number(probe_gain)
+                and abs(float(probe_gain)) <= 0.05
+                and probe_limiter is False
+            ),
+            "status_fixed_gain_consistent": expected_loudness_auto
+            or (
+                _is_number(status_gain)
+                and abs(float(status_gain)) <= 0.05
+                and status_limiter is False
+            ),
             "status_matches_probe_rate": status_matches_probe_rate,
             "status_matches_probe_bits": status_matches_probe_bits,
             "status_matches_probe_channels": status_matches_probe_channels,
@@ -923,8 +1111,6 @@ def scenario_serial_audio_format_chain(dev: SerialEndpoint, audio_probe_path: st
         }
         details["missing_status_audio_keys"] = status_missing
         details["playback_observed_after_play"] = playback_observed_after_play
-        if warnings:
-            details["warnings"] = warnings
         details["checks"] = checks
         return ScenarioResult("serial_audio_format_chain", "PASS" if all(checks.values()) else "FAIL", details)
     except Exception as exc:
@@ -1079,6 +1265,7 @@ def main() -> int:
                     hook_observe_seconds=args.hook_observe_seconds,
                 )
             )
+            results.append(scenario_serial_hotline_defaults(dev))
             results.append(scenario_serial_media_routing(dev))
             results.append(scenario_serial_audio_format_chain(dev, args.audio_probe_path))
             network_result = scenario_serial_network(dev, args.wifi_ssid, args.wifi_password)

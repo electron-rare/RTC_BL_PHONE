@@ -67,9 +67,15 @@ Routes fichier non-tone:
 - `playback_output_channels`
 - `playback_resampler_active`
 - `playback_channel_upmix_active`
+- `playback_loudness_auto`
 - `playback_loudness_gain_db`
 - `playback_limiter_active`
 - `playback_rate_fallback`
+- `playback_copy_source_bytes`
+- `playback_copy_accepted_bytes`
+- `playback_copy_loss_bytes`
+- `playback_copy_loss_events`
+- `playback_last_error`
 - `playback_format_overridden`
 - `firmware.build_id` / `firmware.git_sha` / `firmware.contract_version`
 

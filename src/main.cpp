@@ -22,6 +22,10 @@
 #include "usb/UsbHostRuntime.h"
 #include "usb/UsbMassStorageRuntime.h"
 
+#ifndef BOARD_PROFILE_ESP32_S3
+#error "Current scope is ESP32-S3 only. Build with env:esp32-s3-devkitc-1."
+#endif
+
 #ifndef UNIT_TEST
 namespace {
 
@@ -33,7 +37,10 @@ constexpr bool kPrintHelpOnBoot = false;
 constexpr uint32_t kToneOffSuppressionMs = 1500U;
 constexpr uint32_t kHotlineDefaultLoopPauseMs = 3000U;
 constexpr uint16_t kHotlineMaxPauseMs = 10000U;
-constexpr char kFirmwareContractVersion[] = "A252_AUDIO_CHAIN_V2";
+constexpr uint32_t kEspNowPeerDiscoveryIntervalMs = 60000U;
+constexpr uint32_t kEspNowPeerDiscoveryAckWindowMs = 2500U;
+constexpr char kEspNowDefaultDeviceName[] = "HOTLINE_PHONE";
+constexpr char kFirmwareContractVersion[] = "S3_PCM5102_AUDIO_CHAIN_V1";
 constexpr char kFirmwareBuildId[] = __DATE__ " " __TIME__;
 
 #ifndef RTC_FIRMWARE_GIT_SHA
@@ -52,8 +59,11 @@ constexpr bool kWebAuthLocalDisableEnabled = false;
 BoardProfile g_profile = detectBoardProfile();
 FeatureMatrix g_features = getFeatureMatrix(g_profile);
 
-A252PinsConfig g_pins_cfg = A252ConfigStore::defaultPins();
-A252AudioConfig g_audio_cfg = A252ConfigStore::defaultAudio();
+using ActiveBoardPinsConfig = S3PinsConfig;
+using ActiveBoardAudioConfig = S3AudioConfig;
+
+ActiveBoardPinsConfig g_pins_cfg = A252ConfigStore::defaultS3Pins();
+ActiveBoardAudioConfig g_audio_cfg = A252ConfigStore::defaultS3Audio();
 EspNowPeerStore g_peer_store;
 EspNowCallMap g_espnow_call_map;
 DialMediaMap g_dial_media_map;
@@ -106,13 +116,38 @@ struct HotlineRuntimeState {
 
 HotlineRuntimeState g_hotline;
 
+struct EspNowPeerDiscoveryRuntimeState {
+    bool enabled = true;
+    uint32_t interval_ms = kEspNowPeerDiscoveryIntervalMs;
+    uint32_t ack_window_ms = kEspNowPeerDiscoveryAckWindowMs;
+    uint32_t next_probe_ms = 0U;
+    bool probe_pending = false;
+    String probe_msg_id;
+    uint32_t probe_seq = 0U;
+    uint32_t probe_deadline_ms = 0U;
+    uint32_t probes_sent = 0U;
+    uint32_t probe_send_fail = 0U;
+    uint32_t probe_ack_seen = 0U;
+    uint32_t auto_add_new_ok = 0U;
+    uint32_t auto_add_fail = 0U;
+    String last_mac;
+    String last_device_name;
+    String last_error;
+};
+
+EspNowPeerDiscoveryRuntimeState g_espnow_peer_discovery;
+String g_espnow_local_mac;
+
 void setAmpEnabled(bool enabled) {
+    if (detectBoardProfile() != BoardProfile::ESP32_A252) {
+        return;
+    }
     const bool level_high = (enabled == kAudioAmpActiveHigh);
     digitalWrite(kAudioAmpEnablePin, level_high ? HIGH : LOW);
 }
 
-bool persistA252AudioConfig(const A252AudioConfig& cfg, const char* source);
-bool persistA252AudioConfigIfNeeded(const A252AudioConfig& cfg, const char* source);
+bool persistActiveBoardAudioConfig(const ActiveBoardAudioConfig& cfg, const char* source);
+bool persistActiveBoardAudioConfigIfNeeded(const ActiveBoardAudioConfig& cfg, const char* source);
 String dialSourceText(bool from_pulse);
 bool sendHotlineNotify(const char* state,
                        const String& digit_key,
@@ -130,32 +165,36 @@ bool startHotlineRouteNow(const String& digit_key,
                           const MediaRouteEntry& route);
 void stopHotlineForHangup();
 void tickHotlineRuntime();
+void ensureEspNowDeviceName();
+void initEspNowPeerDiscoveryRuntime();
+void tickEspNowPeerDiscoveryRuntime();
+bool maybeTrackEspNowPeerDiscoveryAck(const String& source, const JsonVariantConst& payload);
 
-void ensureA252AudioDefaults() {
+void ensureActiveBoardAudioDefaults() {
     if (g_profile != BoardProfile::ESP32_A252) {
         return;
     }
 
-    constexpr uint8_t kA252MinVolumePercent = 50;
+    constexpr uint8_t kBoardAudioMinVolumePercent = 50;
     bool updated = false;
 
-    if (g_audio_cfg.volume < kA252MinVolumePercent) {
-        Serial.printf("[RTC_BL_PHONE] correcting A252 audio volume %u -> %u\n",
+    if (g_audio_cfg.volume < kBoardAudioMinVolumePercent) {
+        Serial.printf("[RTC_BL_PHONE] correcting board audio volume %u -> %u\n",
                       static_cast<unsigned>(g_audio_cfg.volume),
-                      static_cast<unsigned>(kA252MinVolumePercent));
-        g_audio_cfg.volume = kA252MinVolumePercent;
+                      static_cast<unsigned>(kBoardAudioMinVolumePercent));
+        g_audio_cfg.volume = kBoardAudioMinVolumePercent;
         updated = true;
     }
 
     if (g_audio_cfg.sample_rate != 8000U) {
-        Serial.printf("[RTC_BL_PHONE] correcting A252 sample_rate %u -> 8000Hz for tone-plan compatibility\n",
+        Serial.printf("[RTC_BL_PHONE] correcting board sample_rate %u -> 8000Hz for tone-plan compatibility\n",
                       static_cast<unsigned>(g_audio_cfg.sample_rate));
         g_audio_cfg.sample_rate = 8000;
         updated = true;
     }
 
     if (g_audio_cfg.bits_per_sample != 16U) {
-        Serial.printf("[RTC_BL_PHONE] correcting A252 bits_per_sample %u -> 16 (codec output lock)\n",
+        Serial.printf("[RTC_BL_PHONE] correcting board bits_per_sample %u -> 16 (codec output lock)\n",
                       static_cast<unsigned>(g_audio_cfg.bits_per_sample));
         g_audio_cfg.bits_per_sample = 16;
         updated = true;
@@ -165,7 +204,7 @@ void ensureA252AudioDefaults() {
     clock_policy.trim();
     clock_policy.toUpperCase();
     if (clock_policy != "HYBRID_TELCO") {
-        Serial.printf("[RTC_BL_PHONE] correcting A252 clock_policy %s -> HYBRID_TELCO\n", g_audio_cfg.clock_policy.c_str());
+        Serial.printf("[RTC_BL_PHONE] correcting board clock_policy %s -> HYBRID_TELCO\n", g_audio_cfg.clock_policy.c_str());
         g_audio_cfg.clock_policy = "HYBRID_TELCO";
         updated = true;
     } else {
@@ -175,13 +214,13 @@ void ensureA252AudioDefaults() {
     String wav_policy = g_audio_cfg.wav_loudness_policy;
     wav_policy.trim();
     wav_policy.toUpperCase();
-    if (wav_policy != "AUTO_NORMALIZE_LIMITER" && wav_policy != "FIXED_GAIN_ONLY") {
-        Serial.printf("[RTC_BL_PHONE] correcting wav_loudness_policy %s -> AUTO_NORMALIZE_LIMITER\n",
+    if (wav_policy != "FIXED_GAIN_ONLY") {
+        Serial.printf("[RTC_BL_PHONE] correcting board wav_loudness_policy %s -> FIXED_GAIN_ONLY\n",
                       g_audio_cfg.wav_loudness_policy.c_str());
-        g_audio_cfg.wav_loudness_policy = "AUTO_NORMALIZE_LIMITER";
+        g_audio_cfg.wav_loudness_policy = "FIXED_GAIN_ONLY";
         updated = true;
     } else {
-        g_audio_cfg.wav_loudness_policy = wav_policy;
+        g_audio_cfg.wav_loudness_policy = "FIXED_GAIN_ONLY";
     }
 
     const int16_t prev_rms = g_audio_cfg.wav_target_rms_dbfs;
@@ -213,15 +252,15 @@ void ensureA252AudioDefaults() {
     if (!updated) {
         return;
     }
-    if (!persistA252AudioConfigIfNeeded(g_audio_cfg, "A252Defaults")) {
-        Serial.println("[RTC_BL_PHONE] failed to persist corrected A252 audio config");
+    if (!persistActiveBoardAudioConfigIfNeeded(g_audio_cfg, "ACTIVE_BOARD_DEFAULTS")) {
+        Serial.println("[RTC_BL_PHONE] failed to persist corrected board audio config");
     }
 }
 
-bool persistA252AudioConfig(const A252AudioConfig& cfg, const char* source) {
+bool persistActiveBoardAudioConfig(const ActiveBoardAudioConfig& cfg, const char* source) {
     const uint8_t previous_volume = g_audio_cfg.volume;
     String error;
-    if (!A252ConfigStore::saveAudio(cfg, &error)) {
+    if (!A252ConfigStore::saveS3Audio(cfg, &error)) {
         Serial.printf(
             "[RTC_BL_PHONE] failed to persist audio config from %s: %s\n",
             source,
@@ -240,19 +279,178 @@ bool persistA252AudioConfig(const A252AudioConfig& cfg, const char* source) {
     return true;
 }
 
-bool persistA252AudioConfigIfNeeded(const A252AudioConfig& cfg, const char* source) {
+bool persistActiveBoardAudioConfigIfNeeded(const ActiveBoardAudioConfig& cfg, const char* source) {
     if (cfg.volume != g_audio_cfg.volume) {
-        return persistA252AudioConfig(cfg, source);
+        return persistActiveBoardAudioConfig(cfg, source);
     }
 
     String error;
-    if (!A252ConfigStore::saveAudio(cfg, &error)) {
+    if (!A252ConfigStore::saveS3Audio(cfg, &error)) {
         Serial.printf("[RTC_BL_PHONE] failed to persist audio config from %s: %s\n", source, error.c_str());
         return false;
     }
 
     g_audio_cfg = cfg;
     return true;
+}
+
+void ensureEspNowDeviceName() {
+    const String expected = A252ConfigStore::normalizeDeviceName(kEspNowDefaultDeviceName);
+    if (expected.isEmpty()) {
+        return;
+    }
+
+    const String current = A252ConfigStore::normalizeDeviceName(g_peer_store.device_name);
+    if (!current.isEmpty()) {
+        g_peer_store.device_name = current;
+        Serial.printf("[RTC_BL_PHONE] espnow device_name=%s\n", current.c_str());
+        return;
+    }
+
+    g_peer_store.device_name = expected;
+    String error;
+    if (!A252ConfigStore::saveEspNowPeers(g_peer_store, &error)) {
+        Serial.printf("[RTC_BL_PHONE] failed to persist espnow device_name=%s: %s\n", expected.c_str(), error.c_str());
+        return;
+    }
+    Serial.printf("[RTC_BL_PHONE] espnow device_name forced to %s\n", expected.c_str());
+}
+
+void initEspNowPeerDiscoveryRuntime() {
+    g_espnow_peer_discovery = EspNowPeerDiscoveryRuntimeState{};
+    g_espnow_local_mac = A252ConfigStore::normalizeMac(WiFi.macAddress());
+    g_espnow_peer_discovery.next_probe_ms = millis() + g_espnow_peer_discovery.interval_ms;
+    Serial.printf("[RTC_BL_PHONE] espnow peer discovery runtime enabled interval_ms=%lu local_mac=%s\n",
+                  static_cast<unsigned long>(g_espnow_peer_discovery.interval_ms),
+                  g_espnow_local_mac.c_str());
+}
+
+bool maybeTrackEspNowPeerDiscoveryAck(const String& source, const JsonVariantConst& payload) {
+    if (!g_espnow_peer_discovery.enabled || !g_espnow_peer_discovery.probe_pending) {
+        return false;
+    }
+    if (!payload.is<JsonObjectConst>()) {
+        return false;
+    }
+
+    const JsonObjectConst root = payload.as<JsonObjectConst>();
+    String type = root["type"] | "";
+    type.toLowerCase();
+    if (type != "ack") {
+        return false;
+    }
+
+    const String msg_id = root["msg_id"] | "";
+    const uint32_t seq = root["seq"] | 0U;
+    if (msg_id != g_espnow_peer_discovery.probe_msg_id || seq != g_espnow_peer_discovery.probe_seq) {
+        return false;
+    }
+
+    const String normalized_source = A252ConfigStore::normalizeMac(source);
+    if (normalized_source.isEmpty()) {
+        return false;
+    }
+    if (!g_espnow_local_mac.isEmpty() && normalized_source == g_espnow_local_mac) {
+        return true;
+    }
+
+    g_espnow_peer_discovery.probe_ack_seen++;
+    g_espnow_peer_discovery.last_mac = normalized_source;
+
+    bool ack_ok = false;
+    String ack_error;
+    String device_name;
+    if (root["payload"].is<JsonObjectConst>()) {
+        const JsonObjectConst ack_payload = root["payload"].as<JsonObjectConst>();
+        ack_ok = ack_payload["ok"] | false;
+        ack_error = ack_payload["error"] | "";
+        if (ack_payload["data"].is<JsonObjectConst>()) {
+            const JsonObjectConst data = ack_payload["data"].as<JsonObjectConst>();
+            if (data["device_name"].is<const char*>()) {
+                device_name = A252ConfigStore::normalizeDeviceName(data["device_name"].as<const char*>());
+            }
+        }
+    }
+    g_espnow_peer_discovery.last_device_name = device_name;
+
+    if (!ack_ok) {
+        g_espnow_peer_discovery.last_error = ack_error.isEmpty() ? String("probe_ack_not_ok") : ack_error;
+        return true;
+    }
+
+    const bool already_known =
+        std::find(g_peer_store.peers.begin(), g_peer_store.peers.end(), normalized_source) != g_peer_store.peers.end();
+    const bool add_ok = g_espnow.addPeer(normalized_source);
+    g_peer_store.peers = g_espnow.peers();
+    g_peer_store.device_name = g_espnow.deviceName();
+
+    if (!add_ok) {
+        g_espnow_peer_discovery.auto_add_fail++;
+        g_espnow_peer_discovery.last_error = "auto_add_peer_failed";
+        Serial.printf("[RTC_BL_PHONE] espnow peer discovery add failed mac=%s\n", normalized_source.c_str());
+        return true;
+    }
+
+    if (!already_known) {
+        g_espnow_peer_discovery.auto_add_new_ok++;
+        Serial.printf("[RTC_BL_PHONE] espnow peer discovery added mac=%s name=%s\n",
+                      normalized_source.c_str(),
+                      device_name.c_str());
+    }
+    g_espnow_peer_discovery.last_error = "";
+    return true;
+}
+
+void tickEspNowPeerDiscoveryRuntime() {
+    if (!g_espnow_peer_discovery.enabled || !g_espnow.isReady()) {
+        return;
+    }
+
+    const uint32_t now = millis();
+    if (g_espnow_peer_discovery.probe_pending) {
+        if (static_cast<int32_t>(now - g_espnow_peer_discovery.probe_deadline_ms) < 0) {
+            return;
+        }
+        g_espnow_peer_discovery.probe_pending = false;
+        g_espnow_peer_discovery.probe_msg_id = "";
+        g_espnow_peer_discovery.probe_seq = 0U;
+        g_espnow_peer_discovery.probe_deadline_ms = 0U;
+        g_espnow_peer_discovery.next_probe_ms = now + g_espnow_peer_discovery.interval_ms;
+    }
+
+    if (static_cast<int32_t>(now - g_espnow_peer_discovery.next_probe_ms) < 0) {
+        return;
+    }
+
+    const uint32_t probe_index = g_espnow_peer_discovery.probes_sent + 1U;
+    const String msg_id = String("peerdisc-") + String(now) + "-" + String(probe_index);
+    const uint32_t seq = now;
+
+    JsonDocument doc;
+    doc["msg_id"] = msg_id;
+    doc["seq"] = seq;
+    doc["type"] = "command";
+    doc["ack"] = true;
+    JsonObject payload = doc["payload"].to<JsonObject>();
+    payload["cmd"] = "ESPNOW_DEVICE_NAME_GET";
+
+    String wire;
+    serializeJson(doc, wire);
+
+    if (!g_espnow.sendJson("broadcast", wire)) {
+        g_espnow_peer_discovery.probe_send_fail++;
+        g_espnow_peer_discovery.last_error = "probe_send_failed";
+        g_espnow_peer_discovery.next_probe_ms = now + g_espnow_peer_discovery.interval_ms;
+        return;
+    }
+
+    g_espnow_peer_discovery.probes_sent = probe_index;
+    g_espnow_peer_discovery.probe_pending = true;
+    g_espnow_peer_discovery.probe_msg_id = msg_id;
+    g_espnow_peer_discovery.probe_seq = seq;
+    g_espnow_peer_discovery.probe_deadline_ms = now + g_espnow_peer_discovery.ack_window_ms;
+    g_espnow_peer_discovery.next_probe_ms = now + g_espnow_peer_discovery.interval_ms;
+    g_espnow_peer_discovery.last_error = "";
 }
 
 DispatchResponse makeResponse(bool ok, const String& code) {
@@ -507,8 +705,8 @@ void initDefaultDialMediaMap(DialMediaMap& out_map) {
         out_map.push_back(entry);
     };
     add_default("1", "/welcome.wav");
-    add_default("2", "/radio.wav");
-    add_default("3", "/souffle.wav");
+    add_default("2", "/souffle.wav");
+    add_default("3", "/radio.wav");
 }
 
 bool findDialMediaRoute(const String& digits, MediaRouteEntry& out_route) {
@@ -737,6 +935,7 @@ bool sendHotlineNotify(const char* state, const String& digit_key, const String&
     payload["digit_key"] = digit_key;
     payload["digits"] = digits;
     payload["source"] = source;
+    payload["device_name"] = g_peer_store.device_name;
     JsonObject out_route = payload["route"].to<JsonObject>();
     out_route["kind"] = mediaRouteKindToString(route.kind);
     if (route.kind == MediaRouteKind::TONE) {
@@ -1111,7 +1310,7 @@ bool parseSceneIdFromArgs(const String& args, String& scene_id) {
     return !scene_id.isEmpty();
 }
 
-AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig& audio_cfg) {
+AudioConfig buildI2sConfig(const ActiveBoardPinsConfig& pins_cfg, const ActiveBoardAudioConfig& audio_cfg) {
     AudioConfig cfg;
     cfg.port = I2S_NUM_0;
     cfg.sample_rate = audio_cfg.sample_rate;
@@ -1131,7 +1330,8 @@ AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig
     cfg.dma_buf_count = 8;
     cfg.dma_buf_len = 256;
     cfg.hybrid_telco_clock_policy = true;
-    cfg.wav_auto_normalize_limiter = !audio_cfg.wav_loudness_policy.equalsIgnoreCase("FIXED_GAIN_ONLY");
+    // Hotline profile: hard-disable WAV auto loudness processing.
+    cfg.wav_auto_normalize_limiter = false;
     cfg.wav_target_rms_dbfs = audio_cfg.wav_target_rms_dbfs;
     cfg.wav_limiter_ceiling_dbfs = audio_cfg.wav_limiter_ceiling_dbfs;
     cfg.wav_limiter_attack_ms = audio_cfg.wav_limiter_attack_ms;
@@ -1139,7 +1339,7 @@ AudioConfig buildI2sConfig(const A252PinsConfig& pins_cfg, const A252AudioConfig
     return cfg;
 }
 
-void applyPcm5102ControlPins(const A252PinsConfig& pins_cfg) {
+void applyPcm5102ControlPins(const ActiveBoardPinsConfig& pins_cfg) {
     auto apply = [](int pin, int value) {
         if (pin < 0) {
             return;
@@ -1279,9 +1479,15 @@ void appendAudioMetrics(JsonObject root) {
     audio["playback_output_channels"] = g_audio.playbackOutputChannels();
     audio["playback_resampler_active"] = g_audio.playbackResamplerActive();
     audio["playback_channel_upmix_active"] = g_audio.playbackChannelUpmixActive();
+    audio["playback_loudness_auto"] = g_audio.playbackLoudnessAuto();
     audio["playback_loudness_gain_db"] = g_audio.playbackLoudnessGainDb();
     audio["playback_limiter_active"] = g_audio.playbackLimiterActive();
     audio["playback_rate_fallback"] = g_audio.playbackRateFallback();
+    audio["playback_copy_source_bytes"] = g_audio.playbackCopySourceBytes();
+    audio["playback_copy_accepted_bytes"] = g_audio.playbackCopyAcceptedBytes();
+    audio["playback_copy_loss_bytes"] = g_audio.playbackCopyLossBytes();
+    audio["playback_copy_loss_events"] = g_audio.playbackCopyLossEvents();
+    audio["playback_last_error"] = g_audio.playbackLastError();
     audio["playback_sample_rate"] = g_audio.playbackSampleRate();
     audio["playback_bits_per_sample"] = g_audio.playbackBitsPerSample();
     audio["playback_channels"] = g_audio.playbackChannels();
@@ -1347,6 +1553,21 @@ void fillStatusSnapshot(JsonObject root) {
     g_espnow.statusToJson(espnow);
     espnow["hotline_notify_last_event"] = g_hotline.last_notify_event;
     espnow["hotline_notify_last_ok"] = g_hotline.last_notify_ok;
+    espnow["peer_discovery_enabled"] = g_espnow_peer_discovery.enabled;
+    espnow["peer_discovery_interval_ms"] = g_espnow_peer_discovery.interval_ms;
+    espnow["peer_discovery_ack_window_ms"] = g_espnow_peer_discovery.ack_window_ms;
+    espnow["peer_discovery_next_probe_ms"] = g_espnow_peer_discovery.next_probe_ms;
+    espnow["peer_discovery_probe_pending"] = g_espnow_peer_discovery.probe_pending;
+    espnow["peer_discovery_probe_msg_id"] = g_espnow_peer_discovery.probe_msg_id;
+    espnow["peer_discovery_probe_seq"] = g_espnow_peer_discovery.probe_seq;
+    espnow["peer_discovery_probes_sent"] = g_espnow_peer_discovery.probes_sent;
+    espnow["peer_discovery_probe_send_fail"] = g_espnow_peer_discovery.probe_send_fail;
+    espnow["peer_discovery_probe_ack_seen"] = g_espnow_peer_discovery.probe_ack_seen;
+    espnow["peer_discovery_auto_add_new_ok"] = g_espnow_peer_discovery.auto_add_new_ok;
+    espnow["peer_discovery_auto_add_fail"] = g_espnow_peer_discovery.auto_add_fail;
+    espnow["peer_discovery_last_mac"] = g_espnow_peer_discovery.last_mac;
+    espnow["peer_discovery_last_device_name"] = g_espnow_peer_discovery.last_device_name;
+    espnow["peer_discovery_last_error"] = g_espnow_peer_discovery.last_error;
 
     JsonObject hw = root["hw"].to<JsonObject>();
     hw["init_ok"] = g_hw_status.init_ok;
@@ -1357,6 +1578,7 @@ void fillStatusSnapshot(JsonObject root) {
     JsonObject config = root["config"].to<JsonObject>();
     A252ConfigStore::pinsToJson(g_pins_cfg, config["pins"].to<JsonObject>());
     A252ConfigStore::audioToJson(g_audio_cfg, config["audio"].to<JsonObject>());
+    config["espnow_device_name"] = g_peer_store.device_name;
     A252ConfigStore::espNowCallMapToJson(g_espnow_call_map, config["espnow_call_map"].to<JsonObject>());
     A252ConfigStore::dialMediaMapToJson(g_dial_media_map, config["dial_media_map"].to<JsonObject>());
     JsonObject migrations = root["config_migrations"].to<JsonObject>();
@@ -1372,8 +1594,8 @@ void fillStatusSnapshot(JsonObject root) {
     A252ConfigStore::peersToJson(g_peer_store, peers);
 }
 
-bool applyPinsPatch(JsonVariantConst patch, A252PinsConfig& target, String& error) {
-    A252PinsConfig next = target;
+bool applyPinsPatch(JsonVariantConst patch, ActiveBoardPinsConfig& target, String& error) {
+    ActiveBoardPinsConfig next = target;
 
     if (patch["i2s"]["bck"].is<int>()) {
         next.i2s_bck = patch["i2s"]["bck"].as<int>();
@@ -1487,8 +1709,8 @@ bool applyPinsPatch(JsonVariantConst patch, A252PinsConfig& target, String& erro
     return true;
 }
 
-bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& error) {
-    A252AudioConfig next = target;
+bool applyAudioPatch(JsonVariantConst patch, ActiveBoardAudioConfig& target, String& error) {
+    ActiveBoardAudioConfig next = target;
 
     if (patch["sample_rate"].is<uint32_t>()) {
         next.sample_rate = patch["sample_rate"].as<uint32_t>();
@@ -1572,6 +1794,7 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
         next.clock_policy = "HYBRID_TELCO";
         next.sample_rate = 8000U;
         next.bits_per_sample = 16U;
+        next.wav_loudness_policy = "FIXED_GAIN_ONLY";
     }
 
     if (!A252ConfigStore::validateAudio(next, error)) {
@@ -1672,14 +1895,15 @@ bool parseStrictMediaRouteFromMapEntry(JsonVariantConst value, MediaRouteEntry& 
     return true;
 }
 
-DispatchResponse applyEspNowCallMapSet(const String& args) {
+DispatchResponse applyEspNowCallMapSetImpl(const String& args, bool persist, const char* command_name) {
+    const String command = command_name == nullptr ? String("ESPNOW_CALL_MAP_SET") : String(command_name);
     if (args.isEmpty()) {
-        return makeResponse(false, "ESPNOW_CALL_MAP_SET invalid_json");
+        return makeResponse(false, command + " invalid_json");
     }
 
     JsonDocument doc;
     if (deserializeJson(doc, args) != DeserializationError::Ok || !doc.is<JsonObject>()) {
-        return makeResponse(false, "ESPNOW_CALL_MAP_SET invalid_json");
+        return makeResponse(false, command + " invalid_json");
     }
 
     JsonObject obj = doc.as<JsonObject>();
@@ -1698,7 +1922,7 @@ DispatchResponse applyEspNowCallMapSet(const String& args) {
         MediaRouteEntry route;
         String route_error;
         if (!parseStrictMediaRouteFromMapEntry(pair.value().as<JsonVariantConst>(), route, route_error)) {
-            return makeResponse(false, "ESPNOW_CALL_MAP_SET " + route_error + " " + keyword);
+            return makeResponse(false, command + " " + route_error + " " + keyword);
         }
 
         bool updated = false;
@@ -1718,25 +1942,32 @@ DispatchResponse applyEspNowCallMapSet(const String& args) {
     }
 
     if (next.empty()) {
-        return makeResponse(false, "ESPNOW_CALL_MAP_SET no_valid_entries");
+        return makeResponse(false, command + " no_valid_entries");
     }
 
-    String save_error;
-    if (!A252ConfigStore::saveEspNowCallMap(next, &save_error)) {
-        return makeResponse(false, "ESPNOW_CALL_MAP_SET save_failed" + (save_error.isEmpty() ? "" : String(" ") + save_error));
+    if (persist) {
+        String save_error;
+        if (!A252ConfigStore::saveEspNowCallMap(next, &save_error)) {
+            return makeResponse(false, command + " save_failed" + (save_error.isEmpty() ? "" : String(" ") + save_error));
+        }
     }
     g_espnow_call_map = next;
-    return makeResponse(true, "ESPNOW_CALL_MAP_SET");
+    return makeResponse(true, command);
 }
 
-DispatchResponse applyDialMediaMapSet(const String& args) {
+DispatchResponse applyEspNowCallMapSet(const String& args) {
+    return applyEspNowCallMapSetImpl(args, true, "ESPNOW_CALL_MAP_SET");
+}
+
+DispatchResponse applyDialMediaMapSetImpl(const String& args, bool persist, const char* command_name) {
+    const String command = command_name == nullptr ? String("DIAL_MEDIA_MAP_SET") : String(command_name);
     if (args.isEmpty()) {
-        return makeResponse(false, "DIAL_MEDIA_MAP_SET invalid_json");
+        return makeResponse(false, command + " invalid_json");
     }
 
     JsonDocument doc;
     if (deserializeJson(doc, args) != DeserializationError::Ok || !doc.is<JsonObject>()) {
-        return makeResponse(false, "DIAL_MEDIA_MAP_SET invalid_json");
+        return makeResponse(false, command + " invalid_json");
     }
 
     DialMediaMap next;
@@ -1748,13 +1979,13 @@ DispatchResponse applyDialMediaMapSet(const String& args) {
             continue;
         }
         if (!isDialMapNumberKey(number)) {
-            return makeResponse(false, "DIAL_MEDIA_MAP_SET invalid_number " + number);
+            return makeResponse(false, command + " invalid_number " + number);
         }
 
         MediaRouteEntry route;
         String route_error;
         if (!parseStrictMediaRouteFromMapEntry(pair.value().as<JsonVariantConst>(), route, route_error)) {
-            return makeResponse(false, "DIAL_MEDIA_MAP_SET " + route_error + " " + number);
+            return makeResponse(false, command + " " + route_error + " " + number);
         }
         DialMediaMapEntry created;
         created.number = number;
@@ -1763,15 +1994,21 @@ DispatchResponse applyDialMediaMapSet(const String& args) {
     }
 
     if (next.empty()) {
-        return makeResponse(false, "DIAL_MEDIA_MAP_SET no_valid_entries");
+        return makeResponse(false, command + " no_valid_entries");
     }
 
-    String save_error;
-    if (!A252ConfigStore::saveDialMediaMap(next, &save_error)) {
-        return makeResponse(false, "DIAL_MEDIA_MAP_SET save_failed" + (save_error.isEmpty() ? "" : String(" ") + save_error));
+    if (persist) {
+        String save_error;
+        if (!A252ConfigStore::saveDialMediaMap(next, &save_error)) {
+            return makeResponse(false, command + " save_failed" + (save_error.isEmpty() ? "" : String(" ") + save_error));
+        }
     }
     g_dial_media_map = next;
-    return makeResponse(true, "DIAL_MEDIA_MAP_SET");
+    return makeResponse(true, command);
+}
+
+DispatchResponse applyDialMediaMapSet(const String& args) {
+    return applyDialMediaMapSetImpl(args, true, "DIAL_MEDIA_MAP_SET");
 }
 
 bool espNowCallMapHasLegacyToneWav(const EspNowCallMap& map) {
@@ -2143,10 +2380,10 @@ void registerCommands() {
             return makeResponse(false, "VOLUME_SET invalid_value");
         }
 
-        A252AudioConfig next = g_audio_cfg;
+        ActiveBoardAudioConfig next = g_audio_cfg;
         next.volume = static_cast<uint8_t>(value);
 
-        if (!persistA252AudioConfigIfNeeded(next, "VOLUME_SET")) {
+        if (!persistActiveBoardAudioConfigIfNeeded(next, "VOLUME_SET")) {
             return makeResponse(false, "VOLUME_SET persist_failed");
         }
 
@@ -2207,6 +2444,7 @@ void registerCommands() {
         const bool ok = g_espnow.addPeer(args);
         if (ok) {
             g_peer_store.peers = g_espnow.peers();
+            g_peer_store.device_name = g_espnow.deviceName();
             A252ConfigStore::saveEspNowPeers(g_peer_store);
         }
         return makeResponse(ok, "ESPNOW_PEER_ADD");
@@ -2219,6 +2457,7 @@ void registerCommands() {
         const bool ok = g_espnow.deletePeer(args);
         if (ok) {
             g_peer_store.peers = g_espnow.peers();
+            g_peer_store.device_name = g_espnow.deviceName();
             A252ConfigStore::saveEspNowPeers(g_peer_store);
         }
         return makeResponse(ok, "ESPNOW_PEER_DEL");
@@ -2227,8 +2466,10 @@ void registerCommands() {
     g_dispatcher.registerCommand("ESPNOW_PEER_LIST", [](const String&) {
         JsonDocument doc;
         JsonObject root = doc.to<JsonObject>();
+        root["device_name"] = g_espnow.deviceName();
         JsonArray peers = root["peers"].to<JsonArray>();
         g_peer_store.peers = g_espnow.peers();
+        g_peer_store.device_name = g_espnow.deviceName();
         A252ConfigStore::peersToJson(g_peer_store, peers);
         return jsonResponse(doc);
     });
@@ -2237,6 +2478,25 @@ void registerCommands() {
         JsonDocument doc;
         g_espnow.statusToJson(doc.to<JsonObject>());
         return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("ESPNOW_DEVICE_NAME_GET", [](const String&) {
+        JsonDocument doc;
+        doc["device_name"] = g_espnow.deviceName();
+        return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("ESPNOW_DEVICE_NAME_SET", [](const String& args) {
+        const String normalized = A252ConfigStore::normalizeDeviceName(args);
+        if (normalized.isEmpty()) {
+            return makeResponse(false, "ESPNOW_DEVICE_NAME_SET invalid_name");
+        }
+        if (!g_espnow.setDeviceName(normalized, true)) {
+            return makeResponse(false, "ESPNOW_DEVICE_NAME_SET persist_failed");
+        }
+        g_peer_store.device_name = g_espnow.deviceName();
+        g_peer_store.peers = g_espnow.peers();
+        return makeResponse(true, "ESPNOW_DEVICE_NAME_SET");
     });
 
     g_dispatcher.registerCommand("ESPNOW_SEND", [](const String& args) {
@@ -2259,12 +2519,21 @@ void registerCommands() {
         return applyEspNowCallMapSet(args);
     });
 
+    g_dispatcher.registerCommand("ESPNOW_CALL_MAP_SET_VOLATILE", [](const String& args) {
+        return applyEspNowCallMapSetImpl(args, false, "ESPNOW_CALL_MAP_SET_VOLATILE");
+    });
+
     g_dispatcher.registerCommand("ESPNOW_CALL_MAP_RESET", [](const String&) {
         initDefaultEspNowCallMap(g_espnow_call_map);
         if (!A252ConfigStore::saveEspNowCallMap(g_espnow_call_map)) {
             return makeResponse(false, "ESPNOW_CALL_MAP_RESET save_failed");
         }
         return makeResponse(true, "ESPNOW_CALL_MAP_RESET");
+    });
+
+    g_dispatcher.registerCommand("ESPNOW_CALL_MAP_RESET_VOLATILE", [](const String&) {
+        initDefaultEspNowCallMap(g_espnow_call_map);
+        return makeResponse(true, "ESPNOW_CALL_MAP_RESET_VOLATILE");
     });
 
     g_dispatcher.registerCommand("DIAL_MEDIA_MAP_GET", [](const String&) {
@@ -2278,12 +2547,21 @@ void registerCommands() {
         return applyDialMediaMapSet(args);
     });
 
+    g_dispatcher.registerCommand("DIAL_MEDIA_MAP_SET_VOLATILE", [](const String& args) {
+        return applyDialMediaMapSetImpl(args, false, "DIAL_MEDIA_MAP_SET_VOLATILE");
+    });
+
     g_dispatcher.registerCommand("DIAL_MEDIA_MAP_RESET", [](const String&) {
         initDefaultDialMediaMap(g_dial_media_map);
         if (!A252ConfigStore::saveDialMediaMap(g_dial_media_map)) {
             return makeResponse(false, "DIAL_MEDIA_MAP_RESET save_failed");
         }
         return makeResponse(true, "DIAL_MEDIA_MAP_RESET");
+    });
+
+    g_dispatcher.registerCommand("DIAL_MEDIA_MAP_RESET_VOLATILE", [](const String&) {
+        initDefaultDialMediaMap(g_dial_media_map);
+        return makeResponse(true, "DIAL_MEDIA_MAP_RESET_VOLATILE");
     });
 
     g_dispatcher.registerCommand("HOTLINE_STATUS", [](const String&) {
@@ -2362,16 +2640,16 @@ void registerCommands() {
             return makeResponse(false, "SLIC_CONFIG_SET invalid_json");
         }
 
-        A252PinsConfig next = g_pins_cfg;
+        ActiveBoardPinsConfig next = g_pins_cfg;
         String error;
         if (!applyPinsPatch(doc.as<JsonVariantConst>(), next, error)) {
             return makeResponse(false, "SLIC_CONFIG_SET " + error);
         }
-        if (!A252ConfigStore::savePins(next, &error)) {
+        if (!A252ConfigStore::saveS3Pins(next, &error)) {
             return makeResponse(false, "SLIC_CONFIG_SET " + error);
         }
 
-        const A252PinsConfig prev = g_pins_cfg;
+        const ActiveBoardPinsConfig prev = g_pins_cfg;
         g_pins_cfg = next;
         if (!applyHardwareConfig()) {
             g_pins_cfg = prev;
@@ -2400,12 +2678,12 @@ void registerCommands() {
             return makeResponse(false, "AUDIO_CONFIG_SET invalid_json");
         }
 
-        A252AudioConfig next = g_audio_cfg;
+        ActiveBoardAudioConfig next = g_audio_cfg;
         String error;
         if (!applyAudioPatch(doc.as<JsonVariantConst>(), next, error)) {
             return makeResponse(false, "AUDIO_CONFIG_SET " + error);
         }
-        if (!persistA252AudioConfigIfNeeded(next, "AUDIO_CONFIG_SET")) {
+        if (!persistActiveBoardAudioConfigIfNeeded(next, "AUDIO_CONFIG_SET")) {
             return makeResponse(false, "AUDIO_CONFIG_SET persist_failed");
         }
 
@@ -2442,12 +2720,12 @@ void registerCommands() {
             return makeResponse(false, "AUDIO_POLICY_SET invalid_json");
         }
 
-        A252AudioConfig next = g_audio_cfg;
+        ActiveBoardAudioConfig next = g_audio_cfg;
         String error;
         if (!applyAudioPatch(doc.as<JsonVariantConst>(), next, error)) {
             return makeResponse(false, "AUDIO_POLICY_SET " + error);
         }
-        if (!persistA252AudioConfigIfNeeded(next, "AUDIO_POLICY_SET")) {
+        if (!persistActiveBoardAudioConfigIfNeeded(next, "AUDIO_POLICY_SET")) {
             return makeResponse(false, "AUDIO_POLICY_SET persist_failed");
         }
 
@@ -2491,11 +2769,15 @@ void registerCommands() {
         root["loudness_gain_db"] = probe.loudness_gain_db;
         root["limiter_active"] = probe.limiter_active;
         root["rate_fallback"] = probe.rate_fallback;
+        root["data_size_bytes"] = probe.data_size_bytes;
+        root["duration_ms"] = probe.duration_ms;
         return jsonResponse(doc);
     });
 }
 
 void processInboundBridgeCommand(const String& source, const JsonVariantConst& payload) {
+    maybeTrackEspNowPeerDiscoveryAck(source, payload);
+
     String cmd;
     String request_id;
     uint32_t request_seq = 0;
@@ -2701,11 +2983,16 @@ void setup() {
     Serial.printf("[RTC_BL_PHONE] USB MSC bootstrap: %s\n", usb_msc ? "ok" : "failed");
 #endif
 
-    A252ConfigStore::loadPins(g_pins_cfg);
+    A252ConfigStore::loadS3Pins(g_pins_cfg);
     g_pins_cfg.slic_line = -1;
-    A252ConfigStore::loadAudio(g_audio_cfg);
-    ensureA252AudioDefaults();
+    A252ConfigStore::loadS3Audio(g_audio_cfg);
+    if (g_profile == BoardProfile::ESP32_A252) {
+        ensureActiveBoardAudioDefaults();
+    } else {
+        Serial.println("[RTC_BL_PHONE] Board scope: ESP32_S3 (A252 codec/profile path disabled)");
+    }
     A252ConfigStore::loadEspNowPeers(g_peer_store);
+    ensureEspNowDeviceName();
     g_config_migrations = ConfigMigrationStatus{};
     initDefaultEspNowCallMap(g_espnow_call_map);
     if (!A252ConfigStore::loadEspNowCallMap(g_espnow_call_map)) {
@@ -2719,24 +3006,18 @@ void setup() {
         g_config_migrations.espnow_call_map_reset = true;
     }
     initDefaultDialMediaMap(g_dial_media_map);
-    if (!A252ConfigStore::loadDialMediaMap(g_dial_media_map)) {
-        initDefaultDialMediaMap(g_dial_media_map);
-        A252ConfigStore::saveDialMediaMap(g_dial_media_map);
-    }
-    if (dialMediaMapHasLegacyToneWav(g_dial_media_map)) {
-        Serial.println("[RTC_BL_PHONE] migration: resetting dial_media_map legacy tone wav routes");
-        initDefaultDialMediaMap(g_dial_media_map);
-        A252ConfigStore::saveDialMediaMap(g_dial_media_map);
-        g_config_migrations.dial_media_map_reset = true;
-    }
-    if (g_dial_media_map.empty()) {
-        Serial.println("[RTC_BL_PHONE] dial_media_map empty -> seeding hotline defaults 1/2/3");
-        initDefaultDialMediaMap(g_dial_media_map);
-        A252ConfigStore::saveDialMediaMap(g_dial_media_map);
+    A252ConfigStore::loadDialMediaMap(g_dial_media_map);
+    initDefaultDialMediaMap(g_dial_media_map);
+    if (!A252ConfigStore::saveDialMediaMap(g_dial_media_map)) {
+        Serial.println("[RTC_BL_PHONE] failed to persist forced hotline preset 1/2/3");
+    } else {
+        Serial.println("[RTC_BL_PHONE] hotline preset forced 1/2/3");
     }
 
-    pinMode(kAudioAmpEnablePin, OUTPUT);
-    setAmpEnabled(true);
+    if (g_profile == BoardProfile::ESP32_A252) {
+        pinMode(kAudioAmpEnablePin, OUTPUT);
+        setAmpEnabled(true);
+    }
 
     const bool hw_init_ok = applyHardwareConfig();
     if (!hw_init_ok) {
@@ -2745,6 +3026,9 @@ void setup() {
     registerCommands();
 
     g_espnow.begin(g_peer_store);
+    g_peer_store.device_name = g_espnow.deviceName();
+    g_peer_store.peers = g_espnow.peers();
+    initEspNowPeerDiscoveryRuntime();
     g_espnow.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
         processInboundBridgeCommand(source, payload);
     });
@@ -2766,6 +3050,7 @@ void loop() {
     g_scope_display.tick();
     g_web_server.handle();
     g_espnow.tick();
+    tickEspNowPeerDiscoveryRuntime();
     pollSerial();
     delay(1);
 }

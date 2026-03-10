@@ -13,9 +13,53 @@ constexpr const char* kEspNowNs = "espnow";
 constexpr const char* kEspNowCallMapNs = "espnow-call";
 constexpr const char* kDialMediaMapNs = "dial-media";
 constexpr uint16_t kMaxPlaybackPauseMs = 10000U;
+constexpr const char* kEspNowKeyPeers = "peers";
+constexpr const char* kEspNowKeyDeviceName = "dev_name";
+constexpr const char* kDefaultEspNowDeviceName = "HOTLINE_PHONE";
+
+// NVS keys are limited to 15 visible chars on ESP32 Preferences/NVS.
+constexpr const char* kAudioKeySampleRate = "sr";
+constexpr const char* kAudioKeyBitsPerSample = "bits";
+constexpr const char* kAudioKeyEnableCapture = "capture";
+constexpr const char* kAudioKeyAdcDspEnabled = "adc_dsp";
+constexpr const char* kAudioKeyAdcFftEnabled = "adc_fft";
+constexpr const char* kAudioKeyAdcDspFftDownsample = "adc_fft_ds";
+constexpr const char* kAudioKeyAdcFftIgnoreLowBin = "adc_fft_lo";
+constexpr const char* kAudioKeyAdcFftIgnoreHighBin = "adc_fft_hi";
+constexpr const char* kAudioKeyVolume = "vol";
+constexpr const char* kAudioKeyRoute = "route";
+constexpr const char* kAudioKeyMute = "mute";
+constexpr const char* kAudioKeyClockPolicy = "clock_policy";
+constexpr const char* kAudioKeyWavLoudnessPolicy = "wav_loud_pol";
+constexpr const char* kAudioKeyWavTargetRmsDbfs = "wav_rms_dbfs";
+constexpr const char* kAudioKeyWavLimiterCeilingDbfs = "wav_ceil_db";
+constexpr const char* kAudioKeyWavLimiterAttackMs = "wav_attack_ms";
+constexpr const char* kAudioKeyWavLimiterReleaseMs = "wav_release_ms";
+constexpr int kMaxGpioA252 = 39;
+constexpr int kMaxGpioS3 = 48;
+
+int maxAllowedPinForProfile(BoardProfile profile) {
+    return profile == BoardProfile::ESP32_S3 ? kMaxGpioS3 : kMaxGpioA252;
+}
 
 bool saveString(Preferences& prefs, const char* key, const String& value) {
-    return prefs.putString(key, value) >= 0;
+    return prefs.putString(key, value) > 0U;
+}
+
+bool saveUChar(Preferences& prefs, const char* key, uint8_t value) {
+    return prefs.putUChar(key, value) == 1U;
+}
+
+bool saveUInt(Preferences& prefs, const char* key, uint32_t value) {
+    return prefs.putUInt(key, value) == sizeof(uint32_t);
+}
+
+bool saveInt(Preferences& prefs, const char* key, int32_t value) {
+    return prefs.putInt(key, value) == sizeof(int32_t);
+}
+
+bool saveBool(Preferences& prefs, const char* key, bool value) {
+    return prefs.putBool(key, value) == 1U;
 }
 
 bool loadJsonArray(const String& raw, JsonDocument& doc) {
@@ -204,9 +248,9 @@ void writeMediaRouteToObject(JsonObject obj, const char* key, const MediaRouteEn
 A252PinsConfig A252ConfigStore::defaultPins() {
     A252PinsConfig cfg;
     if (detectBoardProfile() == BoardProfile::ESP32_S3) {
-        cfg.i2s_bck = 17;
-        cfg.i2s_ws = 18;
-        cfg.i2s_dout = 21;
+        cfg.i2s_bck = 40;
+        cfg.i2s_ws = 41;
+        cfg.i2s_dout = 42;
         cfg.i2s_din = 39;
         cfg.es8388_sda = -1;
         cfg.es8388_scl = -1;
@@ -216,16 +260,24 @@ A252PinsConfig A252ConfigStore::defaultPins() {
         cfg.slic_pd = 14;
         cfg.slic_adc_in = 34;
         cfg.hook_active_high = true;
-        cfg.pcm_flt = 25;
-        cfg.pcm_demp = 26;
-        cfg.pcm_xsmt = 27;
-        cfg.pcm_fmt = 33;
+        cfg.pcm_flt = -1;
+        cfg.pcm_demp = -1;
+        cfg.pcm_xsmt = -1;
+        cfg.pcm_fmt = -1;
     }
     return cfg;
 }
 
+S3PinsConfig A252ConfigStore::defaultS3Pins() {
+    return defaultPins();
+}
+
 A252AudioConfig A252ConfigStore::defaultAudio() {
     return A252AudioConfig{};
+}
+
+S3AudioConfig A252ConfigStore::defaultS3Audio() {
+    return defaultAudio();
 }
 
 bool A252ConfigStore::loadPins(A252PinsConfig& out) {
@@ -262,6 +314,14 @@ bool A252ConfigStore::loadPins(A252PinsConfig& out) {
         return false;
     }
     return true;
+}
+
+bool A252ConfigStore::loadS3Pins(S3PinsConfig& out) {
+    return loadPins(out);
+}
+
+bool A252ConfigStore::saveS3Pins(const S3PinsConfig& cfg, String* error) {
+    return savePins(cfg, error);
 }
 
 bool A252ConfigStore::savePins(const A252PinsConfig& cfg, String* error) {
@@ -311,32 +371,32 @@ bool A252ConfigStore::loadAudio(A252AudioConfig& out) {
         return false;
     }
 
-    out.sample_rate = prefs.getUInt("sr", out.sample_rate);
-    out.bits_per_sample = static_cast<uint8_t>(prefs.getUChar("bits", out.bits_per_sample));
-    out.enable_capture = prefs.getBool("capture", out.enable_capture);
-    out.adc_dsp_enabled = prefs.getBool("adc_dsp", out.adc_dsp_enabled);
-    out.adc_fft_enabled = prefs.getBool("adc_fft", out.adc_fft_enabled);
-    out.adc_dsp_fft_downsample = static_cast<uint8_t>(prefs.getUChar("adc_dsp_fft_downsample", out.adc_dsp_fft_downsample));
+    out.sample_rate = prefs.getUInt(kAudioKeySampleRate, out.sample_rate);
+    out.bits_per_sample = static_cast<uint8_t>(prefs.getUChar(kAudioKeyBitsPerSample, out.bits_per_sample));
+    out.enable_capture = prefs.getBool(kAudioKeyEnableCapture, out.enable_capture);
+    out.adc_dsp_enabled = prefs.getBool(kAudioKeyAdcDspEnabled, out.adc_dsp_enabled);
+    out.adc_fft_enabled = prefs.getBool(kAudioKeyAdcFftEnabled, out.adc_fft_enabled);
+    out.adc_dsp_fft_downsample = static_cast<uint8_t>(prefs.getUChar(kAudioKeyAdcDspFftDownsample, out.adc_dsp_fft_downsample));
     out.adc_fft_ignore_low_bin =
-        static_cast<uint16_t>(prefs.getUInt("adc_fft_ignore_low_bin", out.adc_fft_ignore_low_bin));
+        static_cast<uint16_t>(prefs.getUInt(kAudioKeyAdcFftIgnoreLowBin, out.adc_fft_ignore_low_bin));
     out.adc_fft_ignore_high_bin =
-        static_cast<uint16_t>(prefs.getUInt("adc_fft_ignore_high_bin", out.adc_fft_ignore_high_bin));
-    out.volume = static_cast<uint8_t>(prefs.getUChar("vol", out.volume));
-    out.mute = prefs.getBool("mute", out.mute);
-    if (prefs.isKey("route")) {
-        out.route = prefs.getString("route", out.route);
+        static_cast<uint16_t>(prefs.getUInt(kAudioKeyAdcFftIgnoreHighBin, out.adc_fft_ignore_high_bin));
+    out.volume = static_cast<uint8_t>(prefs.getUChar(kAudioKeyVolume, out.volume));
+    out.mute = prefs.getBool(kAudioKeyMute, out.mute);
+    if (prefs.isKey(kAudioKeyRoute)) {
+        out.route = prefs.getString(kAudioKeyRoute, out.route);
     }
-    if (prefs.isKey("clock_policy")) {
-        out.clock_policy = prefs.getString("clock_policy", out.clock_policy);
+    if (prefs.isKey(kAudioKeyClockPolicy)) {
+        out.clock_policy = prefs.getString(kAudioKeyClockPolicy, out.clock_policy);
     }
-    if (prefs.isKey("wav_loudness_policy")) {
-        out.wav_loudness_policy = prefs.getString("wav_loudness_policy", out.wav_loudness_policy);
+    if (prefs.isKey(kAudioKeyWavLoudnessPolicy)) {
+        out.wav_loudness_policy = prefs.getString(kAudioKeyWavLoudnessPolicy, out.wav_loudness_policy);
     }
-    out.wav_target_rms_dbfs = static_cast<int16_t>(prefs.getInt("wav_rms_dbfs", out.wav_target_rms_dbfs));
+    out.wav_target_rms_dbfs = static_cast<int16_t>(prefs.getInt(kAudioKeyWavTargetRmsDbfs, out.wav_target_rms_dbfs));
     out.wav_limiter_ceiling_dbfs =
-        static_cast<int16_t>(prefs.getInt("wav_ceiling_dbfs", out.wav_limiter_ceiling_dbfs));
-    out.wav_limiter_attack_ms = static_cast<uint16_t>(prefs.getUInt("wav_attack_ms", out.wav_limiter_attack_ms));
-    out.wav_limiter_release_ms = static_cast<uint16_t>(prefs.getUInt("wav_release_ms", out.wav_limiter_release_ms));
+        static_cast<int16_t>(prefs.getInt(kAudioKeyWavLimiterCeilingDbfs, out.wav_limiter_ceiling_dbfs));
+    out.wav_limiter_attack_ms = static_cast<uint16_t>(prefs.getUInt(kAudioKeyWavLimiterAttackMs, out.wav_limiter_attack_ms));
+    out.wav_limiter_release_ms = static_cast<uint16_t>(prefs.getUInt(kAudioKeyWavLimiterReleaseMs, out.wav_limiter_release_ms));
     prefs.end();
 
     String error;
@@ -345,6 +405,14 @@ bool A252ConfigStore::loadAudio(A252AudioConfig& out) {
         return false;
     }
     return true;
+}
+
+bool A252ConfigStore::loadS3Audio(S3AudioConfig& out) {
+    return loadAudio(out);
+}
+
+bool A252ConfigStore::saveS3Audio(const S3AudioConfig& cfg, String* error) {
+    return saveAudio(cfg, error);
 }
 
 bool A252ConfigStore::saveAudio(const A252AudioConfig& cfg, String* error) {
@@ -364,35 +432,49 @@ bool A252ConfigStore::saveAudio(const A252AudioConfig& cfg, String* error) {
         return false;
     }
 
-    prefs.putUInt("sr", cfg.sample_rate);
-    prefs.putUChar("bits", cfg.bits_per_sample);
-    prefs.putBool("capture", cfg.enable_capture);
-    prefs.putBool("adc_dsp", cfg.adc_dsp_enabled);
-    prefs.putBool("adc_fft", cfg.adc_fft_enabled);
-    prefs.putUChar("adc_dsp_fft_downsample", cfg.adc_dsp_fft_downsample);
-    prefs.putUInt("adc_fft_ignore_low_bin", cfg.adc_fft_ignore_low_bin);
-    prefs.putUInt("adc_fft_ignore_high_bin", cfg.adc_fft_ignore_high_bin);
-    prefs.putUChar("vol", cfg.volume);
-    saveString(prefs, "route", cfg.route);
-    prefs.putBool("mute", cfg.mute);
-    saveString(prefs, "clock_policy", cfg.clock_policy);
-    saveString(prefs, "wav_loudness_policy", cfg.wav_loudness_policy);
-    prefs.putInt("wav_rms_dbfs", cfg.wav_target_rms_dbfs);
-    prefs.putInt("wav_ceiling_dbfs", cfg.wav_limiter_ceiling_dbfs);
-    prefs.putUInt("wav_attack_ms", cfg.wav_limiter_attack_ms);
-    prefs.putUInt("wav_release_ms", cfg.wav_limiter_release_ms);
+    bool ok = true;
+    ok = ok && saveUInt(prefs, kAudioKeySampleRate, cfg.sample_rate);
+    ok = ok && saveUChar(prefs, kAudioKeyBitsPerSample, cfg.bits_per_sample);
+    ok = ok && saveBool(prefs, kAudioKeyEnableCapture, cfg.enable_capture);
+    ok = ok && saveBool(prefs, kAudioKeyAdcDspEnabled, cfg.adc_dsp_enabled);
+    ok = ok && saveBool(prefs, kAudioKeyAdcFftEnabled, cfg.adc_fft_enabled);
+    ok = ok && saveUChar(prefs, kAudioKeyAdcDspFftDownsample, cfg.adc_dsp_fft_downsample);
+    ok = ok && saveUInt(prefs, kAudioKeyAdcFftIgnoreLowBin, cfg.adc_fft_ignore_low_bin);
+    ok = ok && saveUInt(prefs, kAudioKeyAdcFftIgnoreHighBin, cfg.adc_fft_ignore_high_bin);
+    ok = ok && saveUChar(prefs, kAudioKeyVolume, cfg.volume);
+    ok = ok && saveString(prefs, kAudioKeyRoute, cfg.route);
+    ok = ok && saveBool(prefs, kAudioKeyMute, cfg.mute);
+    ok = ok && saveString(prefs, kAudioKeyClockPolicy, cfg.clock_policy);
+    ok = ok && saveString(prefs, kAudioKeyWavLoudnessPolicy, cfg.wav_loudness_policy);
+    ok = ok && saveInt(prefs, kAudioKeyWavTargetRmsDbfs, cfg.wav_target_rms_dbfs);
+    ok = ok && saveInt(prefs, kAudioKeyWavLimiterCeilingDbfs, cfg.wav_limiter_ceiling_dbfs);
+    ok = ok && saveUInt(prefs, kAudioKeyWavLimiterAttackMs, cfg.wav_limiter_attack_ms);
+    ok = ok && saveUInt(prefs, kAudioKeyWavLimiterReleaseMs, cfg.wav_limiter_release_ms);
     prefs.end();
+    if (!ok) {
+        if (error) {
+            *error = "nvs_write_failed";
+        }
+        return false;
+    }
     return true;
 }
 
 bool A252ConfigStore::loadEspNowPeers(EspNowPeerStore& out) {
     out.peers.clear();
+    out.device_name = kDefaultEspNowDeviceName;
 
     Preferences prefs;
     if (!prefs.begin(kEspNowNs, false)) {
         return false;
     }
-    const String raw = prefs.isKey("peers") ? prefs.getString("peers", "[]") : String("[]");
+    const String raw = prefs.isKey(kEspNowKeyPeers) ? prefs.getString(kEspNowKeyPeers, "[]") : String("[]");
+    if (prefs.isKey(kEspNowKeyDeviceName)) {
+        const String normalized_name = normalizeDeviceName(prefs.getString(kEspNowKeyDeviceName, kDefaultEspNowDeviceName));
+        if (!normalized_name.isEmpty()) {
+            out.device_name = normalized_name;
+        }
+    }
     prefs.end();
 
     JsonDocument doc;
@@ -553,14 +635,26 @@ bool A252ConfigStore::saveEspNowPeers(const EspNowPeerStore& store, String* erro
         }
         return false;
     }
-    saveString(prefs, "peers", raw);
+    const String normalized_name = normalizeDeviceName(store.device_name);
+    const String device_name = normalized_name.isEmpty() ? String(kDefaultEspNowDeviceName) : normalized_name;
+
+    bool ok = true;
+    ok = ok && saveString(prefs, kEspNowKeyPeers, raw);
+    ok = ok && saveString(prefs, kEspNowKeyDeviceName, device_name);
     prefs.end();
+    if (!ok) {
+        if (error) {
+            *error = "nvs_write_failed";
+        }
+        return false;
+    }
     return true;
 }
 
 bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
     std::vector<int> used;
     used.reserve(14);
+    const int max_gpio = maxAllowedPinForProfile(detectBoardProfile());
 
     const int required_pins[] = {
         cfg.i2s_bck,
@@ -582,7 +676,7 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
     };
 
     for (int pin : required_pins) {
-        if (pin < 0 || pin > 39) {
+        if (pin < 0 || pin > max_gpio) {
             error = "invalid_pin_range";
             return false;
         }
@@ -597,7 +691,7 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
         if (pin == -1) {
             continue;
         }
-        if (pin < 0 || pin > 39) {
+        if (pin < 0 || pin > max_gpio) {
             error = "invalid_pin_range";
             return false;
         }
@@ -617,7 +711,7 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
             error = "pin_conflict";
             return false;
         }
-        if (cfg.es8388_sda < 0 || cfg.es8388_sda > 39 || cfg.es8388_scl < 0 || cfg.es8388_scl > 39) {
+        if (cfg.es8388_sda < 0 || cfg.es8388_sda > max_gpio || cfg.es8388_scl < 0 || cfg.es8388_scl > max_gpio) {
             error = "invalid_pin_range";
             return false;
         }
@@ -630,15 +724,15 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
         used.push_back(cfg.es8388_scl);
     } else {
         if (cfg.es8388_sda >= 0) {
-            if (cfg.es8388_sda > 39 || std::find(used.begin(), used.end(), cfg.es8388_sda) != used.end()) {
-                error = cfg.es8388_sda > 39 ? "invalid_pin_range" : "pin_conflict";
+            if (cfg.es8388_sda > max_gpio || std::find(used.begin(), used.end(), cfg.es8388_sda) != used.end()) {
+                error = cfg.es8388_sda > max_gpio ? "invalid_pin_range" : "pin_conflict";
                 return false;
             }
             used.push_back(cfg.es8388_sda);
         }
         if (cfg.es8388_scl >= 0) {
-            if (cfg.es8388_scl > 39 || std::find(used.begin(), used.end(), cfg.es8388_scl) != used.end()) {
-                error = cfg.es8388_scl > 39 ? "invalid_pin_range" : "pin_conflict";
+            if (cfg.es8388_scl > max_gpio || std::find(used.begin(), used.end(), cfg.es8388_scl) != used.end()) {
+                error = cfg.es8388_scl > max_gpio ? "invalid_pin_range" : "pin_conflict";
                 return false;
             }
             used.push_back(cfg.es8388_scl);
@@ -647,7 +741,7 @@ bool A252ConfigStore::validatePins(const A252PinsConfig& cfg, String& error) {
 
     // Optional legacy line-enable pin, retired by default (-1).
     if (cfg.slic_line != -1) {
-        if (cfg.slic_line < 0 || cfg.slic_line > 39) {
+        if (cfg.slic_line < 0 || cfg.slic_line > max_gpio) {
             error = "invalid_pin_range";
             return false;
         }
@@ -817,6 +911,33 @@ String A252ConfigStore::normalizeMac(const String& value) {
         formatted += compact.substring(i, i + 2);
     }
     return formatted;
+}
+
+String A252ConfigStore::normalizeDeviceName(const String& value) {
+    String name = value;
+    name.trim();
+    name.toUpperCase();
+    if (name.isEmpty()) {
+        return "";
+    }
+
+    constexpr size_t kMaxDeviceNameLength = 24;
+    String normalized;
+    normalized.reserve(std::min<size_t>(name.length(), kMaxDeviceNameLength));
+    for (size_t i = 0; i < name.length(); ++i) {
+        const char c = name[i];
+        const bool is_alpha = (c >= 'A' && c <= 'Z');
+        const bool is_digit = (c >= '0' && c <= '9');
+        const bool is_allowed_symbol = (c == '_' || c == '-');
+        if (!(is_alpha || is_digit || is_allowed_symbol)) {
+            return "";
+        }
+        if (normalized.length() >= kMaxDeviceNameLength) {
+            break;
+        }
+        normalized += c;
+    }
+    return normalized;
 }
 
 bool A252ConfigStore::parseMac(const String& value, uint8_t out[6]) {

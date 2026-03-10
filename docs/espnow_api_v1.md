@@ -63,6 +63,8 @@ Réponse attendue:
 - `WIFI_RECONNECT`
 - `ESPNOW_ON`
 - `ESPNOW_OFF`
+- `ESPNOW_DEVICE_NAME_GET`
+- `ESPNOW_DEVICE_NAME_SET <NAME>`
 - `STORY_REFRESH_SD`
 - `SC_EVENT`
 - `RING`
@@ -83,6 +85,24 @@ Réponse attendue:
 - Trame brute max: `240`
 - Peers: `16`
 - RX queue: `6`
+
+## Device name
+
+- `device_name` est l'identité logique locale (persistée en NVS).
+- Par défaut A252: `HOTLINE_PHONE`.
+- Visible via `ESPNOW_STATUS` et `STATUS` (`espnow.device_name`).
+- Runtime A252: discovery peers auto toutes les `60s` (`ESPNOW_DEVICE_NAME_GET` en broadcast + auto-add des MAC qui répondent).
+
+## Script contrôleur (terrain)
+
+- Script prêt à l'emploi: `scripts/espnow_hotline_control.py`
+- Exemples:
+  - `python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target broadcast --action ring`
+  - `python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target AA:BB:CC:DD:EE:FF --ensure-peer --action status`
+  - `python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target broadcast --action hotline1`
+  - `python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target broadcast+discovery --target-name HOTLINE_PHONE --action ring`
+  - `python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --action discover --target-name HOTLINE_PHONE --discover-rounds 3`
+- En mode `broadcast+discovery`, le script remonte tous les peers observés dans `discovery.candidates`.
 
 ## Réception firmware
 

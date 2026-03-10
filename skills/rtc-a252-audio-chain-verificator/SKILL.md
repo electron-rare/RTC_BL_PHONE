@@ -21,8 +21,9 @@ description: Vérifie la chaîne audio A252 de bout en bout (WAV messages + tone
 2. `AUDIO_POLICY_GET`
 3. `AUDIO_PROBE /welcome.wav` (fallback possible `/musique.wav`)
 4. `PLAY /welcome.wav`
-5. `TONE_PLAY FR_FR dial`
-6. `TONE_STOP`
+5. `STATUS` (poll court jusqu’à observation playback active)
+6. `TONE_PLAY FR_FR dial`
+7. `TONE_STOP`
 
 ## Contrat runtime minimum
 - `STATUS.firmware`:
@@ -32,7 +33,8 @@ description: Vérifie la chaîne audio A252 de bout en bout (WAV messages + tone
   - `playback_input_sample_rate/bits_per_sample/channels`
   - `playback_output_sample_rate/bits_per_sample/channels`
   - `playback_resampler_active`, `playback_channel_upmix_active`
-  - `playback_loudness_gain_db`, `playback_limiter_active`, `playback_rate_fallback`
+  - `playback_loudness_auto`, `playback_loudness_gain_db`, `playback_limiter_active`, `playback_rate_fallback`
+  - `playback_copy_source_bytes`, `playback_copy_accepted_bytes`, `playback_copy_loss_bytes`, `playback_copy_loss_events`, `playback_last_error`
 
 ## Matrice formats WAV attendue
 - Entrée supportée: bits `{8,16,24,32}`, channels `{1,2}`, rates `8k..48k`.
@@ -46,15 +48,19 @@ PASS:
 - `serial_audio_format_chain` PASS.
 - `TONE_PLAY` active `tone_route_active=true` puis `TONE_STOP` coupe la route immédiatement.
 - WAV probe + PLAY cohérents (input/output + flags resampler/upmix/loudness/limiter).
+- Fenêtre playback observée après `PLAY` (`status_playback_window_observed=true`).
+- `playback_copy_loss_events == 0` et `playback_copy_loss_bytes == 0`.
 
 FAIL:
 - Absence de `STATUS.firmware.contract_version`.
 - `PLAY` retourne un format incohérent avec `AUDIO_PROBE`.
 - Output bits != 16 sur A252.
 - Tones code non détectés dans le statut (`tone_route_active/tone_rendering`).
+- Playback non observé après `PLAY`.
+- Perte copy détectée (`playback_copy_loss_events > 0` ou `playback_copy_loss_bytes > 0`).
 
 ## Workflow recommandé
 1. `python3 -m pytest -q scripts/test_hw_validation_contracts.py`
 2. `bash scripts/branch_gate.sh --profile a252`
-3. `python3 scripts/hw_validation.py --port-a252 /dev/cu.usbserial-0001 --no-require-hook-toggle --strict-serial-smoke --allow-capture-fail-when-disabled --audio-probe-path /welcome.wav`
+3. `python3 scripts/hw_validation.py --port-a252 /dev/cu.usbserial-0001 --no-require-hook-toggle --strict-serial-smoke --allow-capture-fail-when-disabled --audio-probe-path /welcome.wav --require-contract-version A252_AUDIO_CHAIN_V4`
 4. Corriger en priorité: contrat firmware -> format chain -> timing tone.

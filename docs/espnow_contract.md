@@ -90,6 +90,7 @@ Le plan tonal standard A252 est documenté dans [docs/audio_tone_plan.md](audio_
 - `UNLOCK`, `NEXT`
 - `WIFI_DISCONNECT`, `WIFI_RECONNECT`
 - `ESPNOW_ON`, `ESPNOW_OFF`
+- `ESPNOW_DEVICE_NAME_GET`, `ESPNOW_DEVICE_NAME_SET <NAME>`
 - `STORY_REFRESH_SD`
 - `SC_EVENT`
 - `RING`
@@ -112,6 +113,14 @@ Le plan tonal standard A252 est documenté dans [docs/audio_tone_plan.md](audio_
 - Trame brute max: `240`
 - Peers: `16`
 - RX queue: `6`
+
+## Identité device
+
+- L'identité logique locale est `device_name` (persistée en NVS namespace `espnow`).
+- Valeur par défaut firmware A252: `HOTLINE_PHONE`.
+- Exposition:
+  - `ESPNOW_STATUS` -> `device_name`
+  - `STATUS.espnow.device_name`
 
 ## Réception côté firmware
 - `type=command` -> `executeEspNowCommandPayload`

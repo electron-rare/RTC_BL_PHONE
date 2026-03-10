@@ -1,360 +1,162 @@
 # RTC_BL_PHONE
 
-Projet ESP32 : téléphone RTC, SLIC, audio, Bluetooth, WiFi, agentic.
+Téléphone RTC expérimental sur ESP32 A252, orienté terrain: numérotation à impulsion, hotline audio, bridge ESP-NOW, validation série stricte.
 
-## CI/CD automatisé
-Le pipeline CI/CD est géré par GitHub Actions + PlatformIO.
+## Esprit Zacus
 
-- **Déclenchement** : à chaque push ou pull request sur `main` ou `release/stable`.
-- **Gate de validation** : exécution du script `scripts/branch_gate.sh` (ordre de checks unifié).
-- **Vérifications** : tests Python/unit, tests hôte DTMF, parity WebUI/commandes, puis builds des cibles actives.
-- **Artefact** : `artifacts/route_parity_report.json` généré par la gate.
+Ce repo se pilote comme une session de terrain:
 
-### Gate de branche (qualité)
-Le script de référence est `scripts/branch_gate.sh` (définition dans [docs/branch_quality_gate.md](docs/branch_quality_gate.md)).
-Commande locale recommandée :
+- `Opérateur` : décroche, compose, déclenche les scénarios.
+- `Analyste` : surveille `STATUS` / `HOTLINE_STATUS` / `ESPNOW_STATUS`.
+- `Archiviste` : garde les logs et rapports dans `artifacts/`.
+
+Référence rôles: [docs/roles_agents.md](docs/roles_agents.md)
+
+## Cible active
+
+- Board focus: `ESP32_A252`
+- Port série usuel: `/dev/cu.usbserial-0001`
+- Contrat firmware courant: `A252_AUDIO_CHAIN_V4`
+
+## Comportement hotline (actuel)
+
+- Preset forcé au boot:
+  - `1 -> /welcome.wav`
+  - `2 -> /souffle.wav`
+  - `3 -> /radio.wav`
+- Numérotation impulsion active combiné décroché.
+- Après sélection d’un numéro valide:
+  - lecture WAV,
+  - pause 3s,
+  - boucle jusqu’au raccroché.
+- Raccroché détecté rapidement (~300 ms).
+- Pas de sonnerie automatique au boot (ring déclenché par événement runtime uniquement).
+
+## ESP-NOW (actuel)
+
+- Identité device persistante: `HOTLINE_PHONE`
+- Commandes dédiées:
+  - `ESPNOW_DEVICE_NAME_GET`
+  - `ESPNOW_DEVICE_NAME_SET <NAME>`
+- Runtime auto-discovery peers:
+  - broadcast `ESPNOW_DEVICE_NAME_GET` toutes les 60s,
+  - auto-ajout des MAC qui répondent,
+  - télémétrie visible dans `STATUS.espnow.peer_discovery_*`.
+
+## Démarrage rapide A252
+
+1. Build:
 
 ```bash
-bash scripts/branch_gate.sh
+pio run -e esp32dev
 ```
 
-Exécuter uniquement les checks sans build (ex. pour un contrôle rapide local) :
+2. Flash:
 
 ```bash
-bash scripts/test_terminal.sh
+pio run -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001
 ```
 
-## Intégration A252 (réintégration firmware)
+3. Validation minimale série (via terminal série 115200):
 
-Repérage du port série (A252: USB-Serial prioritaire) :
+```text
+PING
+STATUS
+ESPNOW_DEVICE_NAME_GET
+DIAL_MEDIA_MAP_GET
+HOTLINE_STATUS
+```
+
+## Script contrôleur ESP-NOW (terrain)
+
+Script: `scripts/espnow_hotline_control.py`
+
+Exemples:
 
 ```bash
-python3 scripts/diagnostic_esp_ports.py
+python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target broadcast+discovery --target-name HOTLINE_PHONE --action ring
+python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --action discover --target-name HOTLINE_PHONE --discover-rounds 3
+python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target AA:BB:CC:DD:EE:FF --ensure-peer --action hotline1
 ```
 
-Commande recommandée de réintégration sur la carte A252 (USB-Serial) :
-
-Si le port USB‑Serial est bien branché, `hw_validation` le détecte automatiquement:
+## Monitoring hotline live
 
 ```bash
-python3 scripts/hw_validation.py \
-  --flash \
-  --wifi-ssid "<SSID>" \
-  --wifi-password "<WIFIPASS>" \
-  --report-json artifacts/hw_validation_a252_report.json \
-  --report-md docs/hw_validation_a252_report.md
+python3 scripts/hotline_live_monitor.py --port /dev/cu.usbserial-0001 --expect 1,2,3
 ```
 
-Ou en mode explicite:
+## Gate de validation
+
+- Contrats/tests Python:
+
+```bash
+python3 -m pytest -q scripts/test_hw_validation_contracts.py scripts/test_runtime_contracts.py
+```
+
+- Validation hardware A252:
 
 ```bash
 python3 scripts/hw_validation.py \
   --port-a252 /dev/cu.usbserial-0001 \
-  --flash \
-  --wifi-ssid "<SSID>" \
-  --wifi-password "<WIFIPASS>" \
-  --report-json artifacts/hw_validation_a252_report.json \
-  --report-md docs/hw_validation_a252_report.md
+  --no-require-hook-toggle \
+  --strict-serial-smoke \
+  --allow-capture-fail-when-disabled \
+  --audio-probe-path /welcome.wav \
+  --require-contract-version A252_AUDIO_CHAIN_V4
 ```
 
-Version minimal sans essais Wi‑Fi (si pas de réseau test) :
-
-```bash
-python3 scripts/hw_validation.py \
-  --port-a252 /dev/cu.usbserial-0001 \
-  --flash \
-  --report-json artifacts/hw_validation_a252_report.json \
-  --report-md docs/hw_validation_a252_report.md
-```
-
-Si le firmware expose une IP après connexion Wi-Fi, les endpoints HTTP sont testés automatiquement. Sinon le scénario HTTP est marqué `MANUAL_SKIP`.
-
-## Livraison
-Après chaque build, les binaires sont disponibles en téléchargement dans les artefacts du workflow.
-
-### Tests
-Les tests sont lancés automatiquement à chaque commit dans `.github/workflows/ci.yml`.
-
-### Références
-- [PlatformIO CI Docs](https://docs.platformio.org/en/latest/ci/index.html)
-- [GitHub Actions Docs](https://docs.github.com/en/actions)
-
-## Notifications CI/CD
-- Le pipeline CI/CD envoie des notifications sur les statuts (succès, échec) via GitHub Actions.
-- Possibilité d’ajouter des notifications Slack ou email (voir .github/workflows/ci.yml).
-
----
-
-_Agent Repo & GitHub – README généré automatiquement._
-
-## Démarrage rapide
-1. Ouvrir le dossier dans PlatformIO.
-2. Option A: renseigner l'adresse MAC dans `src/main.cpp` (`DEFAULT_PEER_ADDR`).
-3. Option B: la définir au runtime avec la commande série `p <mac>`.
-4. Compiler et flasher l'environnement `esp32dev` (par défaut).
-5. Ouvrir le moniteur série à 115200 bauds.
-6. Connecter puis piloter les appels via commandes série.
-
-## Orchestration ZeroClaw (préflight + agent)
-
-- Guide: `docs/zeroclaw_orchestration.md`
-- Préflight hardware avant upload:
-  - `python3 scripts/zeroclaw_hw_preflight.py --require-port`
-- Conversation agent ciblée RTC (depuis `Kill_LIFE`):
-  - `tools/ai/zeroclaw_dual_chat.sh rtc -m "fais un état hardware et propose 3 actions"`
-
-## Commandes série
-- `h` : aide
-- `s` : statut runtime (hook, HFP, audio, call)
-- `p <mac>` : configure la MAC du téléphone (`AA:BB:CC:DD:EE:FF`)
-- `b` : connexion HFP vers le téléphone (Audio Gateway)
-- `x` : déconnexion HFP
-- `m <numero>` : émission d'appel
-- `a` : décrocher un appel entrant
-- `e` : raccrocher / rejeter
-- `v <0..15>` : volume speaker HFP
-
-## Cibles matérielles
-- **ESP32 (Classic BT)** : support HFP complet (`esp32dev`).
-- **ESP32-S3** : Bluetooth Classic non supporté par le silicium, HFP indisponible (le firmware reste compilable avec messages de fallback).
-
-## Comportement hook/ring
-- Si combiné **raccroché** (`ON_HOOK`) : ligne coupée.
-- Si appel entrant : `pinRingCmd` activé, sonnerie pilotable côté AG1171S.
-- Si décroché pendant sonnerie : `answer` automatique.
-- Si raccroché pendant appel : `end/reject` automatique.
-
-## Wiring A252 validé (bench courant)
-- `SLIC RM` -> `GPIO18`
-- `SLIC FR` -> `GPIO5`
-- `SLIC SHK` -> `GPIO23` (`INPUT_PULLUP`, hook actif haut)
-- `SLIC PD` -> `GPIO19`
-- `SLIC LINE` -> non utilisé (`-1`, logique retirée du runtime)
-- `AMP_EN` carte audio -> `GPIO21`, polarité active bas (`LOW=ON`, `HIGH=OFF`)
-- tonalité locale: `425 Hz` (couleur France/Europe)
-
-## Choix de cartes ESP32
-Voir `docs/solutions_rtc_phone_esp32.md` pour la shortlist des DevKit utilisables (ESP32-DevKitC, ESP32-S3-DevKitC-1, NodeMCU-32S, LOLIN32), les liens de référence web, et les solutions d’interface (direct combiné/clavier, SLIC/FXS, ATA externe), dont une variante AG1171S (Silvertel).
-
-## Plan projet (chef de projet)
-Voir `docs/plan_chef_projet_esp32s3_ag1171s.md` pour le planning en phases, les risques, les critères d'acceptation et les livrables de la version ESP32-S3 + AG1171S.
-
-## Audio embarqué et lecture MP3
-
-### Librairie Audio Tools
-Le projet intègre la librairie [Audio Tools](https://github.com/pschatzmann/arduino-audio-tools) pour la lecture MP3/WAV sur ESP32 via I2S (PCM5102, ES8388, DAC interne).
-
-### Exemple d'utilisation
-Lecture automatique d'un fichier MP3 sur carte SD (voir `src/AudioFilePlayer.h/.cpp` et intégration dans `main.cpp`) :
-
-```cpp
-#include <AudioFilePlayer.h>
-
-AudioFilePlayer audioFilePlayer;
-
-void setup() {
-	Serial.begin(115200);
-	if (audioFilePlayer.begin()) {
-		audioFilePlayer.play("/test.mp3");
-	}
-}
-
-void loop() {
-	audioFilePlayer.loop();
-}
-```
-
-### Validation
-- Test lecture MP3 sur hardware ESP32 (SD, I2S, codec)
-- Routage audio, volume, mute
-- Logs série pour débogage
-
-Voir aussi la fiche agent : `docs/fiche_agent_audio_tools.md`
-
-## Arborescence du projet (2026)
-
-```
-src/
-	main.cpp
-	AudioCodec.cpp/h
-	AudioFilePlayer.cpp/h
-	bluetooth/
-		BluetoothManager.cpp/h
-	wifi/
-		WifiManager.cpp/h
-	web/
-		WebServerManager.cpp/h
-	rtos/
-		RTOSManager.cpp/h
-	power/
-		PowerManager.cpp/h
-```
-
-## Stacks embarquées
-
----
-
-## Documentation technique des modules principaux
-
-### 1. AudioManager
-**Fichiers** : src/audio/AudioManager.cpp, src/audio/AudioManager.h
-
-#### Interfaces
-- `AudioManager` expose des méthodes pour l'initialisation, la gestion des flux audio, le contrôle du volume, et la sélection des sources.
-- Interface principale :
-	- `init()` : initialise le module audio
-	- `start()` / `stop()` : démarre ou arrête le flux audio
-	- `setVolume(int level)` : ajuste le volume
-	- `selectSource(AudioSource src)` : sélectionne la source (micro, fichier, etc.)
-
-#### Flux de données
-- Entrées : sources audio (microphone, fichiers, Bluetooth)
-- Traitement : conversion, mixage, contrôle du volume
-- Sorties : haut-parleur, enregistrement, transmission (Bluetooth, Web)
-
-#### Scénarios d’utilisation
-- Lecture audio locale
-- Streaming Bluetooth
-- Enregistrement et restitution
-
-#### Exemple d’intégration
-```cpp
-#include "audio/AudioManager.h"
-AudioManager audio;
-audio.init();
-audio.selectSource(AudioSource::MIC);
-audio.setVolume(80);
-audio.start();
-```
-
----
-
-### 2. RTOSManager
-**Fichiers** : src/rtos/RTOSManager.cpp, src/rtos/RTOSManager.h
-
-#### Interfaces
-- Gestion des tâches, synchronisation, timers.
-- Interface principale :
-	- `createTask(void (*taskFunc)(void*), const char* name)` : création de tâche
-	- `startScheduler()` : démarrage du scheduler
-	- `delay(uint32_t ms)` : temporisation
-
-#### Flux de données
-- Entrées : fonctions de tâches, signaux d’événements
-- Traitement : planification, synchronisation, gestion des priorités
-- Sorties : exécution des tâches, notifications
-
-#### Scénarios d’utilisation
-- Multitâche (audio, Bluetooth, web, etc.)
-- Synchronisation entre modules
-- Gestion des timers pour actions périodiques
-
-#### Exemple d’intégration
-```cpp
-#include "rtos/RTOSManager.h"
-RTOSManager rtos;
-rtos.createTask(audioTask, "AudioTask");
-rtos.startScheduler();
-```
-
----
-
-### 3. BluetoothManager
-**Fichiers** : src/bluetooth/BluetoothManager.cpp, src/bluetooth/BluetoothManager.h
-
-#### Interfaces
-- Gestion du Bluetooth (connexion, transmission, réception)
-- Interface principale :
-	- `init()` : initialise le module Bluetooth
-	- `connect(const char* device)` : connexion à un périphérique
-	- `sendData(const uint8_t* data, size_t len)` : envoi de données
-	- `onReceive(void (*callback)(const uint8_t*, size_t))` : callback de réception
-
-#### Flux de données
-- Entrées : commandes de connexion, données à transmettre
-- Traitement : gestion du protocole, encodage, sécurité
-- Sorties : données reçues, notifications d’état
-
-#### Scénarios d’utilisation
-- Streaming audio via Bluetooth
-- Commandes distantes
-- Synchronisation avec smartphone ou périphérique externe
-
-#### Exemple d’intégration
-```cpp
-#include "bluetooth/BluetoothManager.h"
-BluetoothManager bt;
-bt.init();
-bt.connect("DeviceName");
-bt.sendData(buffer, length);
-```
-
----
-
-## Contrôle MQTT, ESP-NOW et DTMF logiciel
-
-- Contrôle distant via MQTT (ArduinoProps) : topics `rtc_bl_phone/<device_id>/in` (commandes), `rtc_bl_phone/<device_id>/out` (événements).
-- Contrôle local via ESP-NOW (même schéma JSON).
-- Détection DTMF logicielle (Goertzel) : les chiffres détectés sont publiés dans les événements.
-- Limitations ESP32-S3 : pas de Bluetooth Classic, uniquement BLE (les fonctions BT Classic sont désactivées sur S3).
-
-**Exemples** :
-- Publier une commande MQTT :
-  `mosquitto_pub -t rtc_bl_phone/mondevice/in -m '{"cmd":"CALL"}'`
-- Écouter les événements :
-  `mosquitto_sub -t rtc_bl_phone/mondevice/out`
-
-Voir aussi `docs/props.md` pour le schéma détaillé.
-
-## Résumé des fichiers modifiés/créés
-- README.md : ajout de la documentation technique détaillée des modules AudioManager, RTOSManager, BluetoothManager.
-  
-Pour une documentation approfondie, voir aussi les fichiers dans `docs/` (fiche_agent_audio_tools.md, fiche_agent_embarque_stack.md).
-
-Voir la fiche agent : `docs/fiche_agent_embarque_stack.md`
-
-## Tests unitaires et robustesse RTC_BL_PHONE
-
-### Couverture de code
-
-Pour générer le rapport de couverture :
-
-```bash
-bash scripts/gen_coverage.sh
-```
-
-Le rapport HTML sera disponible dans `coverage/html`.
-
-### Types de tests ajoutés
-- Tests de stress (boucles intensives)
-- Edge cases (cas limites)
-- Tests de gestion mémoire (allocation/libération)
-- Tests de thread safety (multithreading)
-- Tests d’interaction entre modules (ex : AudioManager ↔ BluetoothManager)
-
-### Fichiers de tests modifiés
-- test/test_audio_codec.cpp
-- test/test_audio_file_player.cpp
-- test/test_AudioManager.cpp
-- test/test_LectureAudioManager.cpp
-- test/test_SLICManager.cpp
-- test/test_TelephoneSFPManager.cpp
-
-### Script de couverture
-- scripts/gen_coverage.sh
-
-### Exécution
-Lancez les tests avec PlatformIO :
-
-```bash
-bash scripts/test_terminal.sh
-```
-
-Ce script enchaîne:
-- Build des tests embarqués sans upload matériel.
-- Tests hôte DTMF (génération de tonalités synthétiques) en terminal.
-
-Puis, si besoin, générez le rapport de couverture.
-
-### Objectif
-Ces ajouts permettent de valider la robustesse, la gestion mémoire, la sécurité multithread et les interactions entre modules, tout en mesurant la couverture des tests.
+## Docs clés
+
+- Contrat ESP-NOW: [docs/espnow_contract.md](docs/espnow_contract.md)
+- API ESP-NOW: [docs/espnow_api_v1.md](docs/espnow_api_v1.md)
+- Plan tonal/audio: [docs/audio_tone_plan.md](docs/audio_tone_plan.md)
+- Gate qualité: [docs/branch_quality_gate.md](docs/branch_quality_gate.md)
+- Orchestration dual-repo RTC/Zacus: [docs/CROSS_REPO_INTELLIGENCE.md](docs/CROSS_REPO_INTELLIGENCE.md)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- CHANTIER:AUDIT START -->
+## Audit & Execution Plan (2026-03-10)
+
+### Snapshot
+- Priority: `P2`
+- Tech profile: `embedded+cpp/cmake`
+- Workflows: `yes`
+- Tests: `yes`
+- Debt markers: `1`
+- Source files: `84`
+
+### Corrections Prioritaires
+- [ ] Vérifier target PlatformIO et budget mémoire
+- [ ] Ajouter/fiabiliser les commandes de vérification automatiques.
+- [ ] Clore les points bloquants avant optimisation avancée.
+
+### Optimisation
+- [ ] Identifier le hotspot principal et mesurer avant/après.
+- [ ] Réduire la complexité des modules les plus touchés.
+
+### Mémoire chantier
+- Control plane: `/Users/electron/.codex/memories/electron_rare_chantier`
+- Repo card: `/Users/electron/.codex/memories/electron_rare_chantier/REPOS/RTC_BL_PHONE.md`
+
+<!-- CHANTIER:AUDIT END -->

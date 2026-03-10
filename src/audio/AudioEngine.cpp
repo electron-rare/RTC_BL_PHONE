@@ -15,7 +15,7 @@
 namespace {
 constexpr float kTwoPi = 6.28318530718f;
 constexpr int16_t kToneAmplitude = 15000;
-constexpr float kToneLinearGain = 0.70f;
+constexpr float kToneLinearGain = 0.58f;
 // 10 ms at 8 kHz (A252 default sample rate): 80 frames.
 // Smaller chunks reduce visible gaps when scheduling or I2S writes are delayed.
 constexpr size_t kDialToneChunkFrames = 80;
@@ -31,17 +31,22 @@ constexpr uint8_t kAdcDspMinFftDownsample = 1U;
 constexpr uint8_t kAdcDspMaxFftDownsample = 64U;
 constexpr float kDialToneAttackMs = 25.0f;
 constexpr float kDialToneReleaseMs = 40.0f;
-constexpr TickType_t kI2sWriteTimeoutMs = 8;
+constexpr TickType_t kI2sWriteTimeoutMs = 30;
 constexpr uint8_t kToneWriteRetryCount = 10U;
 constexpr TickType_t kI2sReadTimeoutMs = 2;
-constexpr size_t kPlaybackCopyBytes = 1024;
-// Baseline gain kept near unity; WAV loudness policy can still boost adaptively.
-constexpr float kPlaybackBoostLinear = 1.0f;
+constexpr size_t kPlaybackCopyBytes = 256U;
+constexpr uint8_t kPlaybackCopyRetryCount = 8U;
+constexpr uint8_t kPlaybackCopyRetryDelayMs = 1U;
+constexpr uint16_t kBlockingOutputMaxRetries = 2000U;
+constexpr uint8_t kBlockingOutputRetryDelayMs = 1U;
+// Raise baseline WAV playback level for A252 hotline prompts while keeping
+// headroom for adaptive limiter.
+constexpr float kPlaybackBoostLinear = 1.6f;
 // Keep software gain neutral to avoid cumulative clipping with volume boosts.
 constexpr float kPlaybackSoftwareGain = 1.0f;
 constexpr int16_t kAdcRawMax = 4095;
 constexpr int16_t kAdcMidScale = kAdcRawMax / 2;
-constexpr size_t kWavHeaderProbeBytes = 512U;
+constexpr size_t kWavHeaderProbeMaxBytes = 262144U;
 constexpr uint32_t kStableRatesHz[] = {8000U, 16000U, 22050U, 32000U, 44100U, 48000U};
 constexpr float kDbToLinearRef = 20.0f;
 constexpr float kMinRmsLinear = 1.0e-5f;
@@ -127,6 +132,17 @@ float clampFloat(float value, float lo, float hi) {
     return value;
 }
 
+uint32_t saturatingAddU32(uint32_t base, size_t delta) {
+    if (delta == 0U) {
+        return base;
+    }
+    constexpr uint32_t kMax = std::numeric_limits<uint32_t>::max();
+    if (delta >= static_cast<size_t>(kMax) || base >= (kMax - static_cast<uint32_t>(delta))) {
+        return kMax;
+    }
+    return base + static_cast<uint32_t>(delta);
+}
+
 uint16_t readLeUint16(const uint8_t* data) {
     return static_cast<uint16_t>(data[0] | (static_cast<uint16_t>(data[1]) << 8));
 }
@@ -160,13 +176,49 @@ float dbToLinear(float db) {
 }
 }  // namespace
 
+void AudioEngine::BlockingOutput::setOutput(Print* out) {
+    out_ = out;
+}
+
+size_t AudioEngine::BlockingOutput::write(uint8_t b) {
+    return write(&b, 1U);
+}
+
+size_t AudioEngine::BlockingOutput::write(const uint8_t* data, size_t len) {
+    if (out_ == nullptr || data == nullptr || len == 0U) {
+        return 0U;
+    }
+
+    size_t total_written = 0U;
+    uint16_t retry = 0U;
+    while (total_written < len) {
+        const size_t written = out_->write(data + total_written, len - total_written);
+        if (written > 0U) {
+            total_written += written;
+            retry = 0U;
+            continue;
+        }
+        if (retry >= kBlockingOutputMaxRetries) {
+            break;
+        }
+        ++retry;
+        delay(kBlockingOutputRetryDelayMs);
+        taskYIELD();
+    }
+    return total_written;
+}
+
+int AudioEngine::BlockingOutput::availableForWrite() {
+    return (out_ == nullptr) ? 0 : out_->availableForWrite();
+}
+
 AudioConfig defaultAudioConfigForProfile(BoardProfile profile) {
     AudioConfig cfg;
     if (profile == BoardProfile::ESP32_S3) {
         cfg.sample_rate = 8000;
-        cfg.bck_pin = 17;
-        cfg.ws_pin = 18;
-        cfg.data_out_pin = 21;
+        cfg.bck_pin = 40;
+        cfg.ws_pin = 41;
+        cfg.data_out_pin = 42;
         cfg.data_in_pin = 39;
         cfg.enable_capture = true;
     } else {
@@ -187,15 +239,18 @@ AudioEngine::AudioEngine()
       capture_clients_mask_(0),
       playing_(false),
       features_(getFeatureMatrix(detectBoardProfile())) {
+    playback_blocking_output_.setOutput(&playback_volume_stream_);
     playback_gain_stream_.setOutput(i2s_stream_);
     playback_volume_stream_.setOutput(playback_gain_stream_);
+    playback_channel_converter_stream_.setOutput(playback_blocking_output_);
+    playback_resample_stream_.setOutput(playback_channel_converter_stream_);
     wav_stream_.setOutput(playback_volume_stream_);
     wav_stream_.setDecoder(&wav_decoder_);
     wav_copy_.setCheckAvailable(false);
-    wav_copy_.setCheckAvailableForWrite(false);
+    wav_copy_.setCheckAvailableForWrite(true);
     wav_copy_.setMinCopySize(sizeof(int16_t));
-    wav_copy_.setRetry(2);
-    wav_copy_.setRetryDelay(2);
+    wav_copy_.setRetry(kPlaybackCopyRetryCount);
+    wav_copy_.setRetryDelay(kPlaybackCopyRetryDelayMs);
 }
 
 AudioEngine::~AudioEngine() {
@@ -310,7 +365,13 @@ bool AudioEngine::openPlaybackFileForSource(const char* path, MediaSource source
 void AudioEngine::stopPlaybackFile() {
     wav_copy_.end();
     wav_stream_.end();
-    applyWavLoudnessGainDb(0.0f);
+    playback_resample_stream_.end();
+    playback_channel_converter_stream_.end();
+    playback_channel_converter_stream_.setOutput(playback_blocking_output_);
+    playback_resample_stream_.setOutput(playback_channel_converter_stream_);
+    wav_stream_.setOutput(playback_volume_stream_);
+    playback_loudness_gain_db_ = 0.0f;
+    playback_volume_stream_.setVolume(kPlaybackBoostLinear);
     restorePlaybackAudioInfo();
     if (playback_file_) {
         playback_file_.close();
@@ -322,8 +383,10 @@ void AudioEngine::stopPlaybackFile() {
     playback_input_audio_info_.clear();
     playback_resampler_active_ = false;
     playback_channel_upmix_active_ = false;
+    playback_loudness_auto_ = false;
     playback_limiter_active_ = false;
     playback_rate_fallback_ = 0;
+    playback_next_chunk_ms_ = 0U;
     playing_ = false;
 }
 
@@ -331,6 +394,8 @@ bool AudioEngine::prepareWavPlayback(File& file, const char* path) {
     if (!file) {
         return false;
     }
+
+    playback_last_error_ = "";
 
     audio_tools::AudioInfo wav_info{};
     uint32_t data_offset = 0U;
@@ -345,7 +410,8 @@ bool AudioEngine::prepareWavPlayback(File& file, const char* path) {
         playback_loudness_auto_ = false;
         playback_limiter_active_ = false;
         playback_data_offset_ = 0U;
-        applyWavLoudnessGainDb(0.0f);
+        playback_loudness_gain_db_ = 0.0f;
+        playback_volume_stream_.setVolume(kPlaybackBoostLinear);
         restorePlaybackAudioInfo();
         return true;
     }
@@ -363,7 +429,8 @@ bool AudioEngine::prepareWavPlayback(File& file, const char* path) {
         playback_loudness_auto_ = false;
         playback_limiter_active_ = false;
         playback_data_offset_ = 0U;
-        applyWavLoudnessGainDb(0.0f);
+        playback_loudness_gain_db_ = 0.0f;
+        playback_volume_stream_.setVolume(kPlaybackBoostLinear);
         restorePlaybackAudioInfo();
         return true;
     }
@@ -376,15 +443,23 @@ bool AudioEngine::prepareWavPlayback(File& file, const char* path) {
     playback_resampler_active_ = (resolved_output.sample_rate != wav_info.sample_rate);
     playback_channel_upmix_active_ = (wav_info.channels == 1U && resolved_output.channels == 2U);
     applyPlaybackAudioInfo(resolved_output);
-
-    bool limiter_active = false;
-    float gain_db = 0.0f;
-    playback_loudness_auto_ = _config.wav_auto_normalize_limiter;
-    if (_config.wav_auto_normalize_limiter) {
-        gain_db = analyzeWavLoudnessGainDb(file, wav_info, data_offset, data_size, limiter_active);
+    if (!configureWavPlaybackPipeline(wav_info, resolved_output)) {
+        playback_last_error_ = "wav_pipeline_config_failed";
+        playback_resampler_active_ = false;
+        playback_channel_upmix_active_ = false;
+        restorePlaybackAudioInfo();
+        return false;
     }
-    playback_limiter_active_ = limiter_active;
-    applyWavLoudnessGainDb(gain_db);
+
+    playback_loudness_auto_ = _config.wav_auto_normalize_limiter;
+    playback_limiter_active_ = false;
+    playback_loudness_gain_db_ = 0.0f;
+    if (playback_loudness_auto_) {
+        bool limiter_active = false;
+        playback_loudness_gain_db_ = analyzeWavLoudnessGainDb(file, wav_info, data_offset, data_size, limiter_active);
+        playback_limiter_active_ = limiter_active;
+    }
+    playback_volume_stream_.setVolume(kPlaybackBoostLinear);
 
     Serial.printf("[AudioEngine] wav playback header parsed sr=%u ch=%u bits=%u path=%s\n",
                   static_cast<unsigned>(wav_info.sample_rate),
@@ -424,25 +499,17 @@ bool AudioEngine::readWavHeaderInfo(
         return false;
     }
 
-    uint8_t header_buffer[kWavHeaderProbeBytes];
-    const size_t read_len = file.readBytes(reinterpret_cast<char*>(header_buffer), sizeof(header_buffer));
-    file.seek(original_pos);
-
-    if (read_len < 44U) {
-        return false;
-    }
-    if (std::memcmp(header_buffer, "RIFF", 4U) != 0) {
-        return false;
-    }
-    if (std::memcmp(header_buffer + 8U, "WAVE", 4U) != 0) {
-        return false;
-    }
-
-    constexpr size_t kChunkHeaderLen = 8U;
     constexpr uint16_t kRiffAudioFormatPcm = 1U;
+    constexpr size_t kChunkHeaderLen = 8U;
 
-    size_t pos = 12U;
-    if (read_len < pos + kChunkHeaderLen) {
+    uint8_t riff_header[12];
+    const size_t riff_read = file.read(riff_header, sizeof(riff_header));
+    if (riff_read != sizeof(riff_header)) {
+        file.seek(original_pos);
+        return false;
+    }
+    if (std::memcmp(riff_header, "RIFF", 4U) != 0 || std::memcmp(riff_header + 8U, "WAVE", 4U) != 0) {
+        file.seek(original_pos);
         return false;
     }
 
@@ -454,40 +521,56 @@ bool AudioEngine::readWavHeaderInfo(
     uint16_t bits_per_sample = 0U;
     uint32_t data_offset = 0U;
     uint32_t data_size = 0U;
+    size_t scanned_bytes = sizeof(riff_header);
 
-    while (pos + kChunkHeaderLen <= read_len) {
-        const size_t chunk_id = pos;
-        const size_t chunk_len = readLeUint32(header_buffer + pos + 4U);
-        pos += kChunkHeaderLen;
-        if (pos > read_len) {
-            return false;
+    while (scanned_bytes + kChunkHeaderLen <= kWavHeaderProbeMaxBytes) {
+        uint8_t chunk_header[kChunkHeaderLen];
+        const size_t header_read = file.read(chunk_header, sizeof(chunk_header));
+        if (header_read != sizeof(chunk_header)) {
+            break;
         }
+        scanned_bytes += kChunkHeaderLen;
 
-        const size_t available = read_len - pos;
-        if (chunk_len > available) {
+        const uint32_t chunk_len = readLeUint32(chunk_header + 4U);
+        const size_t chunk_data_pos = file.position();
+
+        if (std::memcmp(chunk_header, "fmt ", 4U) == 0) {
+            if (chunk_len < 16U) {
+                file.seek(original_pos);
+                return false;
+            }
+            uint8_t fmt_header[16];
+            const size_t fmt_read = file.read(fmt_header, sizeof(fmt_header));
+            if (fmt_read != sizeof(fmt_header)) {
+                file.seek(original_pos);
+                return false;
+            }
+            audio_format = readLeUint16(fmt_header + 0U);
+            channels = readLeUint16(fmt_header + 2U);
+            sample_rate = readLeUint32(fmt_header + 4U);
+            bits_per_sample = readLeUint16(fmt_header + 14U);
+            fmt_found = true;
+        } else if (std::memcmp(chunk_header, "data", 4U) == 0) {
+            data_offset = static_cast<uint32_t>(chunk_data_pos);
+            data_size = chunk_len;
+            data_found = true;
             break;
         }
 
-        if (std::memcmp(header_buffer + chunk_id, "fmt ", 4U) == 0) {
-            if (chunk_len < 16U) {
-                return false;
-            }
-            audio_format = readLeUint16(header_buffer + pos + 0U);
-            channels = readLeUint16(header_buffer + pos + 2U);
-            sample_rate = readLeUint32(header_buffer + pos + 4U);
-            bits_per_sample = readLeUint16(header_buffer + pos + 14U);
-            fmt_found = true;
-        } else if (std::memcmp(header_buffer + chunk_id, "data", 4U) == 0) {
-            data_offset = static_cast<uint32_t>(pos);
-            data_size = static_cast<uint32_t>(chunk_len);
-            data_found = true;
-        }
-
-        pos += chunk_len;
+        size_t next_pos = chunk_data_pos + static_cast<size_t>(chunk_len);
         if ((chunk_len & 1U) != 0U) {
-            ++pos;
+            ++next_pos;
+        }
+        scanned_bytes += static_cast<size_t>(chunk_len) + static_cast<size_t>(chunk_len & 1U);
+        if (scanned_bytes > kWavHeaderProbeMaxBytes) {
+            break;
+        }
+        if (!file.seek(next_pos)) {
+            break;
         }
     }
+
+    file.seek(original_pos);
 
     if (!fmt_found) {
         return false;
@@ -551,7 +634,13 @@ audio_tools::AudioInfo AudioEngine::resolvePlaybackFormat(const audio_tools::Aud
     audio_tools::AudioInfo output = input;
     uint32_t fallback_rate_hz = 0U;
     if (_config.hybrid_telco_clock_policy) {
-        output.sample_rate = resolveStableSampleRate(input.sample_rate, fallback_rate_hz);
+        // Hybrid policy for media fidelity: follow WAV input rate when stable,
+        // fallback to nearest stable rate only when needed.
+        uint32_t stable_fallback_rate_hz = 0U;
+        output.sample_rate = resolveStableSampleRate(input.sample_rate, stable_fallback_rate_hz);
+        if (output.sample_rate != input.sample_rate) {
+            fallback_rate_hz = output.sample_rate;
+        }
     } else {
         output.sample_rate = _config.sample_rate;
         if (output.sample_rate != input.sample_rate) {
@@ -560,8 +649,54 @@ audio_tools::AudioInfo AudioEngine::resolvePlaybackFormat(const audio_tools::Aud
     }
     playback_rate_fallback_ = fallback_rate_hz;
     output.bits_per_sample = 16U;
-    output.channels = 2U;
+    output.channels = (input.channels >= 2U) ? 2U : 1U;
     return output;
+}
+
+bool AudioEngine::configureWavPlaybackPipeline(const audio_tools::AudioInfo& input, const audio_tools::AudioInfo& output) {
+    playback_resample_stream_.end();
+    playback_channel_converter_stream_.end();
+    playback_channel_converter_stream_.setOutput(playback_blocking_output_);
+    playback_resample_stream_.setOutput(playback_channel_converter_stream_);
+    wav_stream_.setOutput(playback_volume_stream_);
+
+    const bool channel_convert_active = (output.channels != input.channels);
+
+    if (playback_resampler_active_) {
+        if (channel_convert_active) {
+            playback_resample_stream_.setOutput(playback_channel_converter_stream_);
+        } else {
+            playback_resample_stream_.setOutput(playback_volume_stream_);
+        }
+        wav_stream_.setOutput(playback_resample_stream_);
+        if (!playback_resample_stream_.begin(input, static_cast<int>(output.sample_rate))) {
+            Serial.printf("[AudioEngine] wav resampler begin failed in_sr=%u out_sr=%u\n",
+                          static_cast<unsigned>(input.sample_rate),
+                          static_cast<unsigned>(output.sample_rate));
+            return false;
+        }
+    } else {
+        if (channel_convert_active) {
+            wav_stream_.setOutput(playback_channel_converter_stream_);
+        } else {
+            wav_stream_.setOutput(playback_volume_stream_);
+        }
+    }
+
+    if (channel_convert_active) {
+        audio_tools::AudioInfo converter_input = input;
+        if (playback_resampler_active_) {
+            converter_input.sample_rate = output.sample_rate;
+        }
+        if (!playback_channel_converter_stream_.begin(converter_input, static_cast<int>(output.channels))) {
+            Serial.printf("[AudioEngine] wav channel converter begin failed in_ch=%u out_ch=%u\n",
+                          static_cast<unsigned>(converter_input.channels),
+                          static_cast<unsigned>(output.channels));
+            return false;
+        }
+    }
+
+    return true;
 }
 
 void AudioEngine::applyPlaybackAudioInfo(const audio_tools::AudioInfo& info) {
@@ -725,13 +860,6 @@ float AudioEngine::analyzeWavLoudnessGainDb(
 
     desired_gain = clampFloat(desired_gain, 0.125f, 4.0f);
     return linearToDb(desired_gain);
-}
-
-void AudioEngine::applyWavLoudnessGainDb(float gain_db) {
-    playback_loudness_gain_db_ = gain_db;
-    const float gain_linear = dbToLinear(gain_db);
-    const float requested_volume = clampFloat(kPlaybackBoostLinear * gain_linear, 0.05f, 4.0f);
-    playback_volume_stream_.setVolume(requested_volume);
 }
 
 void AudioEngine::restorePlaybackAudioInfo() {
@@ -974,9 +1102,10 @@ bool AudioEngine::begin(const AudioConfig& config) {
     _config = config;
     adc_capture_pin_ = config.capture_adc_pin;
     use_adc_capture_ = (adc_capture_pin_ >= 0);
+    const int max_gpio = (detectBoardProfile() == BoardProfile::ESP32_S3) ? 48 : 39;
 
     if (use_adc_capture_) {
-        if (adc_capture_pin_ < 0 || adc_capture_pin_ > 39) {
+        if (adc_capture_pin_ < 0 || adc_capture_pin_ > max_gpio) {
             Serial.printf("[AudioEngine] invalid ADC pin for capture: %d\n", adc_capture_pin_);
             return false;
         }
@@ -1056,12 +1185,18 @@ bool AudioEngine::begin(const AudioConfig& config) {
     playback_audio_info_overridden_ = false;
     playback_resampler_active_ = false;
     playback_channel_upmix_active_ = false;
-    playback_loudness_auto_ = _config.wav_auto_normalize_limiter;
+    playback_loudness_auto_ = false;
     playback_loudness_gain_db_ = 0.0f;
     playback_limiter_active_ = false;
     playback_rate_fallback_ = 0U;
+    playback_copy_source_bytes_ = 0U;
+    playback_copy_accepted_bytes_ = 0U;
+    playback_copy_loss_bytes_ = 0U;
+    playback_copy_loss_events_ = 0U;
+    playback_last_error_ = "";
     playback_data_offset_ = 0U;
     playback_data_remaining_ = 0U;
+    playback_next_chunk_ms_ = 0U;
 
     audio_tools::VolumeStreamConfig volume_cfg = playback_volume_stream_.defaultConfig();
     volume_cfg.bits_per_sample = 16;
@@ -1196,32 +1331,43 @@ void AudioEngine::stopPlayback() {
 
 bool AudioEngine::playFileFromSource(const char* path, MediaSource source) {
     if (!driver_installed_ || path == nullptr || path[0] == '\0') {
+        playback_last_error_ = "invalid_play_request";
         return false;
     }
     if (!ensureStorageForSource(source)) {
+        playback_last_error_ = "storage_unavailable";
         return false;
     }
 
     stopTone();
     stopPlaybackFile();
+    playback_last_error_ = "";
 
     fs::FS* mounted_fs = nullptr;
     MediaSource selected_source = MediaSource::AUTO;
     if (!openPlaybackFileForSource(path, source, mounted_fs, selected_source) || mounted_fs == nullptr || !playback_file_) {
         Serial.printf("[AudioEngine] playback file not found source=%s path=%s\n", mediaSourceToString(source), path);
+        playback_last_error_ = "file_not_found";
         return false;
     }
 
     if (!prepareWavPlayback(playback_file_, path)) {
+        playback_last_error_ = "wav_prepare_failed";
         stopPlaybackFile();
         return false;
     }
 
     if (!wav_stream_.begin()) {
+        playback_last_error_ = "decoder_begin_failed";
         stopPlaybackFile();
         Serial.printf("[AudioEngine] wav decoder begin failed: %s\n", path);
         return false;
     }
+    // Re-assert runtime volume after decoder init because stream reconfiguration
+    // may reset volume state on some runs.
+    const float gain_linear = dbToLinear(playback_loudness_gain_db_);
+    const float requested_volume = clampFloat(kPlaybackBoostLinear * gain_linear, 0.05f, 4.0f);
+    playback_volume_stream_.setVolume(requested_volume);
     wav_copy_.begin(wav_stream_, playback_file_);
     playback_path_ = path;
     last_storage_path_ = path;
@@ -1600,6 +1746,10 @@ bool AudioEngine::playbackChannelUpmixActive() const {
     return playback_channel_upmix_active_;
 }
 
+bool AudioEngine::playbackLoudnessAuto() const {
+    return playback_loudness_auto_;
+}
+
 float AudioEngine::playbackLoudnessGainDb() const {
     return playback_loudness_gain_db_;
 }
@@ -1610,6 +1760,26 @@ bool AudioEngine::playbackLimiterActive() const {
 
 uint32_t AudioEngine::playbackRateFallback() const {
     return playback_rate_fallback_;
+}
+
+uint32_t AudioEngine::playbackCopySourceBytes() const {
+    return playback_copy_source_bytes_;
+}
+
+uint32_t AudioEngine::playbackCopyAcceptedBytes() const {
+    return playback_copy_accepted_bytes_;
+}
+
+uint32_t AudioEngine::playbackCopyLossBytes() const {
+    return playback_copy_loss_bytes_;
+}
+
+uint32_t AudioEngine::playbackCopyLossEvents() const {
+    return playback_copy_loss_events_;
+}
+
+String AudioEngine::playbackLastError() const {
+    return playback_last_error_;
 }
 
 bool AudioEngine::isDialToneActive() const {
@@ -1689,6 +1859,12 @@ AudioRuntimeMetrics AudioEngine::metrics() const {
 
 void AudioEngine::resetMetrics() {
     metrics_ = AudioRuntimeMetrics{};
+    playback_copy_source_bytes_ = 0U;
+    playback_copy_accepted_bytes_ = 0U;
+    playback_copy_loss_bytes_ = 0U;
+    playback_copy_loss_events_ = 0U;
+    playback_last_error_ = "";
+    playback_next_chunk_ms_ = 0U;
 }
 
 bool AudioEngine::probePlaybackFileFromSource(const char* path, MediaSource source, AudioPlaybackProbeResult& out) {
@@ -1720,38 +1896,29 @@ bool AudioEngine::probePlaybackFileFromSource(const char* path, MediaSource sour
     uint32_t data_offset = 0U;
     uint32_t data_size = 0U;
     const bool parsed = readWavHeaderInfo(playback_file_, wav_info, &data_offset, &data_size);
-    playback_file_.close();
     if (!parsed) {
+        playback_file_.close();
         out.error = "wav_header_parse_failed";
         return false;
     }
     if (!isPlaybackAudioInfoSupported(wav_info)) {
+        playback_file_.close();
         out.error = "unsupported_wav_format";
         return false;
     }
 
-    uint32_t fallback_rate_hz = 0U;
-    audio_tools::AudioInfo output_info = wav_info;
-    if (_config.hybrid_telco_clock_policy) {
-        output_info.sample_rate = resolveStableSampleRate(wav_info.sample_rate, fallback_rate_hz);
-    } else {
-        output_info.sample_rate = _config.sample_rate;
-        if (output_info.sample_rate != wav_info.sample_rate) {
-            fallback_rate_hz = output_info.sample_rate;
-        }
-    }
-    output_info.bits_per_sample = 16U;
-    output_info.channels = 2U;
+    const uint32_t runtime_rate_fallback = playback_rate_fallback_;
+    const audio_tools::AudioInfo output_info = resolvePlaybackFormat(wav_info);
+    const uint32_t fallback_rate_hz = playback_rate_fallback_;
+    playback_rate_fallback_ = runtime_rate_fallback;
 
     bool limiter_active = false;
     float gain_db = 0.0f;
-    if (_config.wav_auto_normalize_limiter) {
-        File probe_file = mounted_fs->open(path, FILE_READ);
-        if (probe_file) {
-            gain_db = analyzeWavLoudnessGainDb(probe_file, wav_info, data_offset, data_size, limiter_active);
-            probe_file.close();
-        }
+    const bool loudness_auto = _config.wav_auto_normalize_limiter;
+    if (loudness_auto) {
+        gain_db = analyzeWavLoudnessGainDb(playback_file_, wav_info, data_offset, data_size, limiter_active);
     }
+    playback_file_.close();
 
     out.ok = true;
     out.source = selected_source;
@@ -1763,10 +1930,21 @@ bool AudioEngine::probePlaybackFileFromSource(const char* path, MediaSource sour
     out.output_channels = static_cast<uint8_t>(output_info.channels);
     out.resampler_active = (output_info.sample_rate != wav_info.sample_rate);
     out.channel_upmix_active = (wav_info.channels == 1U && output_info.channels == 2U);
-    out.loudness_auto = _config.wav_auto_normalize_limiter;
+    out.loudness_auto = loudness_auto;
     out.loudness_gain_db = gain_db;
     out.limiter_active = limiter_active;
     out.rate_fallback = fallback_rate_hz;
+    out.data_size_bytes = data_size;
+    out.duration_ms = 0U;
+    const uint32_t bytes_per_sample = static_cast<uint32_t>(wav_info.bits_per_sample / 8U);
+    const uint32_t bytes_per_frame = bytes_per_sample * static_cast<uint32_t>(wav_info.channels);
+    if (bytes_per_frame > 0U && wav_info.sample_rate > 0U && data_size > 0U) {
+        const uint64_t frames = static_cast<uint64_t>(data_size / bytes_per_frame);
+        const uint64_t duration_ms = (frames * 1000ULL) / static_cast<uint64_t>(wav_info.sample_rate);
+        out.duration_ms = duration_ms > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())
+                              ? std::numeric_limits<uint32_t>::max()
+                              : static_cast<uint32_t>(duration_ms);
+    }
     return true;
 }
 
@@ -1785,8 +1963,40 @@ bool AudioEngine::streamPlaybackChunk() {
         return false;
     }
 
-    const size_t copied = wav_copy_.copyBytes(kPlaybackCopyBytes);
-    if (copied > 0U) {
+    const uint32_t now_ms = millis();
+    if (playback_next_chunk_ms_ != 0U &&
+        static_cast<int32_t>(now_ms - playback_next_chunk_ms_) < 0) {
+        return true;
+    }
+
+    size_t total_source_advanced = 0U;
+    size_t total_copied = 0U;
+
+    const size_t pos_before = playback_file_.position();
+    total_copied = wav_copy_.copyBytes(kPlaybackCopyBytes);
+    const size_t pos_after = playback_file_.position();
+    total_source_advanced = (pos_after >= pos_before) ? (pos_after - pos_before) : 0U;
+
+    const size_t progress_bytes = (total_source_advanced > 0U) ? total_source_advanced : total_copied;
+    if (progress_bytes > 0U) {
+        playback_copy_source_bytes_ = saturatingAddU32(playback_copy_source_bytes_, progress_bytes);
+        playback_copy_accepted_bytes_ = saturatingAddU32(playback_copy_accepted_bytes_, progress_bytes);
+    }
+
+    if (progress_bytes > 0U) {
+        uint32_t next_delay_ms = 1U;
+        const uint32_t bytes_per_sample = std::max<uint32_t>(1U, playback_input_audio_info_.bits_per_sample / 8U);
+        const uint32_t channels = std::max<uint32_t>(1U, playback_input_audio_info_.channels);
+        const uint32_t bytes_per_frame = bytes_per_sample * channels;
+        const uint32_t input_rate = std::max<uint32_t>(1U, playback_input_audio_info_.sample_rate);
+        if (bytes_per_frame > 0U) {
+            const uint32_t frames = static_cast<uint32_t>(progress_bytes / bytes_per_frame);
+            if (frames > 0U) {
+                const uint32_t chunk_ms = std::max<uint32_t>(1U, (frames * 1000U) / input_rate);
+                next_delay_ms = std::max<uint32_t>(1U, chunk_ms / 2U);
+            }
+        }
+        playback_next_chunk_ms_ = now_ms + next_delay_ms;
         return true;
     }
 
@@ -1795,6 +2005,7 @@ bool AudioEngine::streamPlaybackChunk() {
         return false;
     }
 
+    playback_next_chunk_ms_ = now_ms + 1U;
     return true;
 }
 

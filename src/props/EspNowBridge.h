@@ -22,6 +22,8 @@ public:
     bool addPeer(const String& mac);
     bool deletePeer(const String& mac);
     const std::vector<String>& peers() const;
+    const String& deviceName() const;
+    bool setDeviceName(const String& name, bool persist = true);
 
     bool sendJson(const String& target, const String& json_payload);
     bool isReady() const;
