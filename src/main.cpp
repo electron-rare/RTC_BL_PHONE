@@ -48,7 +48,7 @@ constexpr char kFirmwareBuildId[] = __DATE__ " " __TIME__;
 #endif
 constexpr char kFirmwareGitSha[] = RTC_FIRMWARE_GIT_SHA;
 // Branch lock: API web access remains open (no Wi-Fi basic auth) for this flow.
-constexpr bool kWebAuthEnabledByDefault = false;
+constexpr bool kWebAuthEnabledByDefault = true;
 
 #ifdef RTC_WEB_AUTH_DEV_DISABLE
 constexpr bool kWebAuthLocalDisableEnabled = true;
@@ -257,6 +257,26 @@ void ensureActiveBoardAudioDefaults() {
     }
 }
 
+bool isSameActiveBoardAudioConfig(const ActiveBoardAudioConfig& lhs, const ActiveBoardAudioConfig& rhs) {
+    return lhs.sample_rate == rhs.sample_rate &&
+           lhs.bits_per_sample == rhs.bits_per_sample &&
+           lhs.enable_capture == rhs.enable_capture &&
+           lhs.adc_dsp_enabled == rhs.adc_dsp_enabled &&
+           lhs.adc_fft_enabled == rhs.adc_fft_enabled &&
+           lhs.adc_dsp_fft_downsample == rhs.adc_dsp_fft_downsample &&
+           lhs.adc_fft_ignore_low_bin == rhs.adc_fft_ignore_low_bin &&
+           lhs.adc_fft_ignore_high_bin == rhs.adc_fft_ignore_high_bin &&
+           lhs.volume == rhs.volume &&
+           lhs.mute == rhs.mute &&
+           lhs.route == rhs.route &&
+           lhs.clock_policy == rhs.clock_policy &&
+           lhs.wav_loudness_policy == rhs.wav_loudness_policy &&
+           lhs.wav_target_rms_dbfs == rhs.wav_target_rms_dbfs &&
+           lhs.wav_limiter_ceiling_dbfs == rhs.wav_limiter_ceiling_dbfs &&
+           lhs.wav_limiter_attack_ms == rhs.wav_limiter_attack_ms &&
+           lhs.wav_limiter_release_ms == rhs.wav_limiter_release_ms;
+}
+
 bool persistActiveBoardAudioConfig(const ActiveBoardAudioConfig& cfg, const char* source) {
     const uint8_t previous_volume = g_audio_cfg.volume;
     String error;
@@ -280,18 +300,10 @@ bool persistActiveBoardAudioConfig(const ActiveBoardAudioConfig& cfg, const char
 }
 
 bool persistActiveBoardAudioConfigIfNeeded(const ActiveBoardAudioConfig& cfg, const char* source) {
-    if (cfg.volume != g_audio_cfg.volume) {
-        return persistActiveBoardAudioConfig(cfg, source);
+    if (isSameActiveBoardAudioConfig(cfg, g_audio_cfg)) {
+        return true;
     }
-
-    String error;
-    if (!A252ConfigStore::saveS3Audio(cfg, &error)) {
-        Serial.printf("[RTC_BL_PHONE] failed to persist audio config from %s: %s\n", source, error.c_str());
-        return false;
-    }
-
-    g_audio_cfg = cfg;
-    return true;
+    return persistActiveBoardAudioConfig(cfg, source);
 }
 
 void ensureEspNowDeviceName() {
@@ -580,7 +592,13 @@ String sanitizeFsPath(const String& raw_path) {
     if (!path.startsWith("/")) {
         path = "/" + path;
     }
-    if (path.indexOf("..") >= 0) {
+    // URL-decode common traversal patterns
+    String decoded = path;
+    decoded.replace("%2e", ".");
+    decoded.replace("%2E", ".");
+    decoded.replace("%2f", "/");
+    decoded.replace("%2F", "/");
+    if (decoded.indexOf("..") >= 0) {
         return "";
     }
     return path;
@@ -3052,6 +3070,6 @@ void loop() {
     g_espnow.tick();
     tickEspNowPeerDiscoveryRuntime();
     pollSerial();
-    delay(1);
+    vTaskDelay(1);
 }
 #endif  // UNIT_TEST

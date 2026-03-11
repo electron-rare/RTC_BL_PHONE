@@ -28,7 +28,7 @@ WebServerManager::WebServerManager(uint16_t port)
       status_cache_mux_(portMUX_INITIALIZER_UNLOCKED),
       auth_enabled_(true),
       auth_user_("admin"),
-      auth_pass_("admin") {}
+      auth_pass_("zacus-web-42") {}
 
 void WebServerManager::begin() {
 #ifdef USB_MSC_BOOT_ENABLE

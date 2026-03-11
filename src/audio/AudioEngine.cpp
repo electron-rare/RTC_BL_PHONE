@@ -269,7 +269,8 @@ size_t AudioEngine::activeChannelCount(i2s_channel_fmt_t channel_format) {
 
 bool AudioEngine::lockI2s() const {
     if (i2s_io_mutex_ == nullptr) {
-        return true;
+        Serial.println("[AudioEngine] WARNING: I2S mutex unavailable, skipping lock");
+        return false;
     }
     return xSemaphoreTake(i2s_io_mutex_, pdMS_TO_TICKS(1)) == pdTRUE;
 }
